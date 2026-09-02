@@ -3,7 +3,7 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
-## 2026-09-03 — Task 5: Image and CI (awaiting first CI run)
+## 2026-09-03 — Task 5: Image and CI
 
 - **What changed:** `Dockerfile`, `.dockerignore`, `docker/requirements.txt`,
   `.github/workflows/docker.yml`, `tests/test_image.py`.
@@ -45,14 +45,23 @@ reading cold. Why-questions belong in `DECISIONS.md`.
   --wheel` confirmed hatchling packages `static/index.html` and
   `weights_manifest.json`. The build-time smoke test imports our package
   and only checks that `sglang_omni` is installed (no CUDA on the runner).
-  **Not yet verified:** the build itself. The laptop never builds this
-  image by design; the first GitHub Actions run is the test. Pending user
-  actions: add the two Docker Hub secrets, commit, push.
-- **Limitations / follow-ups:** Runner disk headroom is unknown until the
-  first run (base ~35–40 GB uncompressed). Fallback if it fails: buildah on
-  a RunPod CPU pod. The import smoke test imports `sglang_omni` on a
-  GPU-less runner; if that import needs CUDA the step will be relaxed to
-  `import tunecast.boot` only.
+  **First CI run (GitHub Actions run 33687738008, commit 7ddf5a7):**
+  success in 14 min 16 s. Runner disk 118 GB free before the build, 71 GB
+  after (the runner had 145 GB, more than assumed). Build and push took
+  about 6 min; pulling the image back for the package listing another
+  5.5 min. ngrok 3.39.11 checksum verified, `tunecast import ok`. The
+  install layer resolved 278 packages and changed three: added
+  `sglang-omni 0.1.4` and `httptools`, upgraded `huggingface-hub` 1.28.0 →
+  1.29.0. Everything else came from the base. Pushed
+  `arpitkadam/tunecast:latest` and `:sha-7ddf5a7`, both digest
+  `sha256:4ab2ede8…`, 14.84 GB compressed (same as the base within
+  rounding). Resolved set (358 entries, Python 3.12.3, torch
+  2.13.0+cu130, sglang-kernel 0.4.6.post1, sglang editable from the base's
+  source tree) committed as `docker/installed.txt` for reference.
+- **Limitations / follow-ups:** The image is unverified on a GPU until
+  Task 7. `sglang` is an editable install inside the base image, so it
+  appears as a path in `installed.txt`, not a version pin; the base digest
+  pins it.
 
 ## 2026-09-03 — Task 4: Web UI
 

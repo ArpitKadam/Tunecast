@@ -94,6 +94,6 @@ These override the clauses above. Reasoning in `DECISIONS.md`; full design in
 | 2 | Sidecar clients (HTTP + stub), SQLite job store, worker queue, GPU info, FastAPI routes + auth, API tests | done 2026-09-03 |
 | 3 | Supervisor `tunecast.boot`, ngrok tunnel control, readiness, local stub run with real tunnel | done 2026-09-03 |
 | 4 | Web UI (single static page) served at `/`, manual check through tunnel | done 2026-09-03 |
-| 5 | Dockerfile, GPU dependency lock, GitHub Actions workflow, first image on Docker Hub | built 2026-09-03, awaiting first CI run |
+| 5 | Dockerfile, GPU dependency lock, GitHub Actions workflow, first image on Docker Hub | done 2026-09-03 (run 33687738008, `sha-7ddf5a7`) |
 | 6 | RunPod template doc, client script, README, EXPLANATION entry | pending |
 | 7 | Pod verification run (owner-executed), measured numbers into README/EXPLANATION, fixes | pending |
