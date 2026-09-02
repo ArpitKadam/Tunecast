@@ -3,6 +3,57 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-09-03 — Task 5: Image and CI (awaiting first CI run)
+
+- **What changed:** `Dockerfile`, `.dockerignore`, `docker/requirements.txt`,
+  `.github/workflows/docker.yml`, `tests/test_image.py`.
+- **How it works:**
+  - `FROM hongccc/sglang-omni:dev@sha256:02a85f00…` (digest pin; the base
+    is lmsysorg/sglang v0.5.18 on Ubuntu 24.04 with CUDA 13.0.3, and its
+    system Python already holds sglang, sgl-kernel, flashinfer with cubins,
+    torch 2.13 and sglang-omni's dependency set). Layers, in cache-friendly
+    order: apt `tini`; ngrok 3.39.11 from the versioned tarball, verified
+    against a sha256 baked as an `ARG`; pinned `uv` 0.11.16; the four exact
+    pins in `docker/requirements.txt` installed with `uv pip install
+    --system`, with the resolved set frozen to `/app/docker/installed.txt`;
+    then our package last with `--no-deps`, followed by an import smoke
+    test. `ENTRYPOINT ["tini","--","python3","-m","tunecast.boot"]`,
+    `EXPOSE 8080`, a `HEALTHCHECK` on `/health` with a 30-minute start
+    period for model load. `TUNECAST_DATA_DIR=/workspace` and
+    `SGLANG_OMNI_AUTO_CLONE=0` (disables the base's dev entrypoint habit).
+  - Workflow: on push to `main`, tags `v*`, or manual dispatch. Frees
+    runner disk (`jlumbroso/free-disk-space`), logs `df -h` before and
+    after, buildx, Docker Hub login from `DOCKERHUB_USERNAME` /
+    `DOCKERHUB_TOKEN` secrets, `metadata-action` tags `sha-<7>`
+    (immutable), `latest` on main, semver on tags, `build-push-action` with
+    a registry build cache at `arpitkadam/tunecast:buildcache`, then
+    prints the image's `installed.txt`.
+  - `.dockerignore` keeps `.env*`, `.git`, `.data`, tests, docs and the
+    project markdown out of the build context.
+- **How it was verified so far:**
+  ```
+  uv run pytest -q
+  81 passed
+  ```
+  `tests/test_image.py` guards the promises: base digest, tini entrypoint,
+  ngrok version + sha256 + `sha256sum -c`, the four pins, `.dockerignore`
+  entries, and the workflow's tags, cache, secrets and disk step. Workflow
+  YAML parses. Inputs were verified against live sources: PyPI metadata
+  for sglang 0.5.18 / sglang-omni 0.1.4 / flash-attn-4 / flashinfer, the
+  base image manifest and config pulled from Docker Hub (76 layers, 14.8 GB
+  compressed), the ngrok tarball downloaded and hashed locally. `uv build
+  --wheel` confirmed hatchling packages `static/index.html` and
+  `weights_manifest.json`. The build-time smoke test imports our package
+  and only checks that `sglang_omni` is installed (no CUDA on the runner).
+  **Not yet verified:** the build itself. The laptop never builds this
+  image by design; the first GitHub Actions run is the test. Pending user
+  actions: add the two Docker Hub secrets, commit, push.
+- **Limitations / follow-ups:** Runner disk headroom is unknown until the
+  first run (base ~35–40 GB uncompressed). Fallback if it fails: buildah on
+  a RunPod CPU pod. The import smoke test imports `sglang_omni` on a
+  GPU-less runner; if that import needs CUDA the step will be relaxed to
+  `import tunecast.boot` only.
+
 ## 2026-09-03 — Task 4: Web UI
 
 - **What changed:** `tunecast/static/index.html` (one file, vanilla JS,

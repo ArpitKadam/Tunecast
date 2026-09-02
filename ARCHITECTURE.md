@@ -42,7 +42,7 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | Supervisor | `tunecast/boot.py` | Boot sequence, sidecar process, readiness state, exit codes |
 | UI | `tunecast/static/index.html` | Single page, vanilla JS |
 | Client | `client/generate.py` | Submit, poll, save; end-to-end proof |
-| Image | `Dockerfile`, `docker/requirements-gpu.in`, `docker/requirements.lock` | Digest-pinned base, pinned venv, ngrok binary |
+| Image | `Dockerfile`, `docker/requirements.txt`, `.dockerignore` | Digest-pinned base, four exact-pinned additions on system Python, ngrok binary by sha256, tini entrypoint |
 | CI | `.github/workflows/docker.yml` | Build and push on `main` / `v*` |
 
 ## Data flow: one generation
@@ -113,7 +113,7 @@ Tunecast/
 │   └── static/index.html
 ├── tests/               pytest, stub mode only
 ├── client/generate.py
-├── docker/              GPU dependency pins
+├── docker/              requirements.txt: additions on top of the base image
 ├── docs/
 │   ├── runpod-template.md
 │   └── superpowers/{specs,plans}/

@@ -1,0 +1,8 @@
+# Installed on top of the digest-pinned base image's system Python (see Dockerfile).
+# The base already provides sglang 0.5.18, sgl-kernel, flashinfer 0.6.17, torch 2.13.0 and
+# sglang-omni's own dependency set; these are the only additions. The full resolved set of every
+# build is written to /app/docker/installed.txt inside the image and printed by CI.
+sglang-omni==0.1.4
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+huggingface_hub==1.29.0

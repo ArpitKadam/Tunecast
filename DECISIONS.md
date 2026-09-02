@@ -3,6 +3,12 @@
 Append-only, newest first. Each entry records what was chosen, what else was
 on the table, and the evidence that settled it.
 
+## 2026-09-03 — Install onto the base image's system Python, not an isolated venv
+- **Decision:** The Dockerfile adds `sglang-omni==0.1.4`, `fastapi`, `uvicorn`, `huggingface_hub` (all exact-pinned in `docker/requirements.txt`) to the base image's system Python with `uv pip install --system`. Every build writes the fully resolved set to `/app/docker/installed.txt` and CI prints it.
+- **Alternatives considered:** A fresh `/opt/venv` from a cross-platform `uv pip compile` lock (the original plan); `--system-site-packages` venv.
+- **Why:** Reading the base image's build history showed it is `lmsysorg/sglang:v0.5.18` with `sgl-kernel 0.4.6.post1`, flashinfer 0.6.17 (cubins), torch 2.13 and sglang-omni's dependency set already in system Python, plus UCX built from source. A venv resolved from PyPI lacks `sgl-kernel` at that version (not on PyPI; sglang's bare PyPI metadata does not depend on it) and would fail at runtime, while duplicating ~7 GB of CUDA wheels. The digest pin freezes the base's package set; the four additions are exact-pinned.
+- **Consequences:** Transitive packages that the base lacks and sglang-omni 0.1.4 needs resolve at build time; `installed.txt` records them. If a rebuild ever drifts, promote `installed.txt` to a `--no-deps` lock. Revisit when the base image changes.
+
 ## 2026-09-03 — `tini` as container entrypoint, Python handles SIGTERM itself during boot
 - **Decision:** The Dockerfile (Task 5) runs `tini -- python -m tunecast.boot`. `Supervisor.run()` installs SIGTERM/SIGINT handlers on entry so a stop during the sidecar or tunnel wait ends boot promptly with exit 0.
 - **Alternatives considered:** Python as bare PID 1 (ignores SIGTERM until uvicorn installs handlers; never reaps orphaned `sgl-omni` workers); a bash entrypoint with `exec`; supervisord.
