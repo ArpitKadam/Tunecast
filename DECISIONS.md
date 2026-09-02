@@ -3,6 +3,12 @@
 Append-only, newest first. Each entry records what was chosen, what else was
 on the table, and the evidence that settled it.
 
+## 2026-09-03 — `tini` as container entrypoint, Python handles SIGTERM itself during boot
+- **Decision:** The Dockerfile (Task 5) runs `tini -- python -m tunecast.boot`. `Supervisor.run()` installs SIGTERM/SIGINT handlers on entry so a stop during the sidecar or tunnel wait ends boot promptly with exit 0.
+- **Alternatives considered:** Python as bare PID 1 (ignores SIGTERM until uvicorn installs handlers; never reaps orphaned `sgl-omni` workers); a bash entrypoint with `exec`; supervisord.
+- **Why:** `sgl-omni` is multi-process. If its parent dies, its workers are re-parented to PID 1 and only an init that reaps (tini) clears them. The Python-side handler covers the 30-minute model-load window that uvicorn's handler does not.
+- **Consequences:** One extra apt package in the image. Signal path: tini → python (handler sets stop) → uvicorn/children stopped in `finally`.
+
 ## 2026-09-02 — Weights integrity check is size manifest + marker, not sha256
 - **Decision:** Boot verifies weights by comparing every file's size against a committed manifest (88 entries from the HF API at the pinned revision) and by a `.tunecast_complete` marker containing the revision. No full-file hashing.
 - **Alternatives considered:** sha256 of all 57 GB on every boot; trusting `snapshot_download` alone.

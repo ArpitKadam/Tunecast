@@ -28,9 +28,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(rec, default=str)
 
 
-def setup_logging(logs_dir: Path | None, filename: str = "boot.jsonl") -> logging.Logger:
-    """Return the shared logger with fresh handlers; safe to call more than once."""
-    logger = logging.getLogger(LOGGER_NAME)
+def setup_logging(logs_dir: Path | None, filename: str = "boot.jsonl", name: str = LOGGER_NAME) -> logging.Logger:
+    """Return the named logger with fresh handlers; safe to call more than once."""
+    logger = logging.getLogger(name)
     for handler in list(logger.handlers):
         handler.close()
         logger.removeHandler(handler)

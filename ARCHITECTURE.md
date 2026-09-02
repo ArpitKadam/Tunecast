@@ -87,8 +87,13 @@ def create_app(settings, store, runner, sidecar, state: ReadyState) -> FastAPI
 class NgrokTunnel: start() -> None; wait_bound(timeout_s) -> bool; alive() -> bool; stop() -> None
 
 # boot.py
-def main() -> int
+def build_sidecar_command(settings) -> list[str]
+class SidecarProcess: start(); alive(); returncode(); wait_ready(client, timeout_s) -> bool; stop()
+class Supervisor(settings, host="0.0.0.0"): run() -> int; request_stop()
+def main() -> int   # exit codes: 1 config, 2 weights, 3 sidecar never ready, 4 tunnel never bound, 5 sidecar died, 6 API port taken
 ```
+
+Boot order: env → weights → sidecar ready → job store/workers → **bind API socket** → ngrok bound → serve. The socket is bound before the tunnel exists so the public domain never fronts a closed port.
 
 ## Invariants
 

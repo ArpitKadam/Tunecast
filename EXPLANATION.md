@@ -3,6 +3,70 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-09-03 — Task 3: Supervisor, ngrok tunnel, readiness
+
+- **What changed:** `tunecast/boot.py` (the container entrypoint) and
+  `tunecast/tunnel.py`, with `tests/test_boot.py` and
+  `tests/test_tunnel.py`. `log.setup_logging` gained a `name` parameter so
+  job events get their own `jobs.jsonl`; the test fixture now resets every
+  `tunecast*` logger.
+- **How it works:**
+  - `python -m tunecast.boot` → `main()` loads settings (exit 1 with the
+    variable name on stderr if unusable) and runs `Supervisor.run()`.
+  - `run()` logs `env_ok`, then: stub mode uses `StubSidecar`; real mode
+    calls `ensure_weights` (exit 2 on failure), spawns
+    `sgl-omni serve --model-path <models_dir> --host 127.0.0.1 --port
+    8000` (+ `--dit_dav.factory.dit_steps` / `dit_cfg_scale` when set) and
+    polls `HttpSidecar.ready()` for up to 30 min (exit 3). Then it opens
+    the job store, fails stale running/queued rows ("pod restarted"),
+    starts the worker threads, builds the app, and **binds the API socket
+    before anything is exposed** (`api_bound`; exit 6 if the port is
+    taken). Only then does it spawn `ngrok http <port> --url=<domain>`
+    with the authtoken in the child's environment (never argv), waits up
+    to 60 s for the domain to appear in ngrok's local API (exit 4), flips
+    `ReadyState.tunnel`, and hands the agent to a supervise thread that
+    restarts it with 1→60 s exponential backoff and drops `/ready` to 503
+    while it is down. Finally `api_ready` is logged and uvicorn runs in
+    the main thread on the pre-bound socket. A watcher thread turns a dead
+    sidecar into exit 5. SIGTERM reaches uvicorn's handler; the `finally`
+    stops ngrok and the sidecar.
+  - Every stage line carries `elapsed_s` (since the previous stage) and
+    `since_boot_s`, which is the cold-start breakdown the README will
+    report.
+- **How it was verified:**
+  ```
+  uv run pytest -q
+  76 passed in 20.57s
+  ```
+  Unit tests drive `NgrokTunnel` with `python -c` stand-ins for the agent
+  and a stdlib fake of ngrok's local API (bind, timeout, unreachable API,
+  restart-on-death, state flag). `test_stub_boot_reaches_ready_and_serves_a_job`
+  runs the real supervisor in a thread on a free port and checks
+  `/ready`, a job submit, a clean stop (exit 0), and both log files.
+
+  Live run on the laptop with the real ngrok agent and the owner's
+  `.env` sourced by the shell (values never printed), stub sidecar, port
+  8090 because Apache (`httpd.exe`) owns 8080 on this machine:
+  ```
+  boot → api_bound 0.06 s → tunnel_ready 1.27 s → api_ready 1.27 s
+  public /ready                      200 {"model":true,"tunnel":true}
+  public /info without key           401
+  public /info with key              200 (stub, RTX 3050 listed)
+  public POST /jobs (5 s)            202 → succeeded, inference_s 0.25
+  public GET /jobs/<id>/audio        200, 640 044 bytes, 0.94 s, 5.0 s WAV
+  public GET /                       200
+  ```
+  The first live attempt exposed a real defect: readiness was logged
+  before the bind, and a bind failure produced no JSON event and reused
+  exit code 1. Fixed test-first (`test_boot_exits_6_when_api_port_is_taken`).
+- **Limitations / follow-ups:** The sidecar CLI override names
+  (`--dit_dav.factory.dit_steps`, `--dit_dav.factory.dit_cfg_scale`) follow
+  sglang-omni's `<stage>.<section>.<field>` convention seen in its cookbook
+  but are unverified until the pod run; they are only emitted when the env
+  vars are set. Progress while the tunnel is down is not queued anywhere:
+  clients see 503 on `/ready` and retry. On Windows, refusing a closed
+  port takes ~2 s, so `test_wait_bound_false_when_api_unreachable` is slow.
+
 ## 2026-09-03 — Task 2: Sidecar clients, job queue, authenticated API
 
 - **What changed:** Four new modules: `tunecast/sidecar.py`,
