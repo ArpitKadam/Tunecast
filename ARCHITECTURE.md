@@ -50,7 +50,7 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 1. `POST /jobs` → auth → pydantic validation → `JobStore.create` (status `queued`) → `JobRunner.submit(id)` → 202 with job JSON.
 2. Worker thread pops the id, `JobStore.update(status="running", started_at=…)`, builds the sidecar payload (`input`, `instructions`, `seed`, `max_new_tokens = duration_s × 25`, `response_format`, `stream=false`), POSTs to `http://127.0.0.1:8000/v1/audio/speech`.
 3. Response bytes written to `outputs/<id>.wav`; `timings`, `gpu` captured; status `succeeded`. Any failure → status `failed`, `error` filled.
-4. `GET /jobs/{id}` returns the row plus computed `queue_position` and `progress`.
+4. `GET /jobs/{id}` returns the row plus computed `queue_position` (jobs ahead: running + queued earlier) and `progress` (estimate, capped 0.95 while running).
 5. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`.
 6. Prune deletes the oldest succeeded jobs beyond `TUNECAST_KEEP_LAST`.
 
@@ -74,8 +74,8 @@ class Sidecar(Protocol):
 
 # jobs.py
 class JobStore:  create(params) -> Job; get(id) -> Job | None; list(limit) -> list[Job]
-                 update(id, **fields) -> None; delete(id) -> None
-                 queued_ids() -> list[str]; mark_stale_failed() -> int; prune(keep_last) -> list[str]
+                 update(id, **fields) -> int (rows changed); delete(id) -> bool (False if running/unknown)
+                 ahead_of(id) -> int; queued_ids() -> list[str]; mark_stale_failed() -> int; prune(keep_last) -> list[str]
 class JobRunner: submit(job_id: str) -> None; start() -> None
 def job_to_dict(job: Job, store: JobStore, estimator: Estimator) -> dict
 

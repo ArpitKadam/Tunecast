@@ -3,6 +3,66 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-09-03 — Task 2: Sidecar clients, job queue, authenticated API
+
+- **What changed:** Four new modules: `tunecast/sidecar.py`,
+  `tunecast/jobs.py`, `tunecast/gpu.py`, `tunecast/app.py`. Three new test
+  files. Dev dependency `httpx` replaced by `httpx2` (Starlette deprecated
+  the old one). `.env.example` rewritten with every variable and its purpose.
+- **How it works:**
+  - `sidecar.py`: `GenerateParams` carries lyrics, description,
+    duration, seed, format and derives `max_new_tokens` (duration × 25) and
+    an HTTP timeout (duration × 10 + 120 s). `HttpSidecar` POSTs the
+    official payload to `/v1/audio/speech` on `sgl-omni`, writes the WAV
+    atomically (`.part` then rename), and turns any non-200, timeout, or
+    connection failure into `SidecarError` carrying the server's message.
+    `StubSidecar` sleeps briefly and writes a 400 Hz sine (32 kHz stereo
+    16-bit) of the requested length, so the whole stack runs without CUDA.
+  - `jobs.py`: `JobStore` is one SQLite connection behind a lock (WAL),
+    one `jobs` table; `params`, `timings`, `gpu` are JSON columns. It
+    creates, reads, lists newest-first, updates whitelisted columns,
+    deletes row + WAV, counts jobs ahead of a queued job, marks stale
+    running/queued rows failed with "pod restarted", and prunes succeeded
+    jobs beyond `keep_last`. `Estimator` predicts inference time from the
+    median ratio of the last 10 jobs (seed 0.6 s per audio second).
+    `JobRunner` starts N daemon threads that pop job ids from a
+    `queue.Queue`, mark running, call the sidecar, record timings + GPU
+    memory, mark succeeded/failed, then prune. A worker never dies: any
+    exception becomes a failed job with the message.
+  - `app.py`: `create_app(settings, store, runner, sidecar, state)` builds
+    the FastAPI app. `require_key` parses `Authorization: Bearer` and
+    compares with `hmac.compare_digest`; failures are 401 with
+    `WWW-Authenticate: Bearer`. Routes: `/health`, `/ready` (503 until both
+    `ReadyState` flags), `/info`, `POST /jobs` (202, seed randomised when
+    omitted), `GET /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/audio`
+    (`FileResponse`, 409 until succeeded), `DELETE /jobs/{id}` (409 while
+    running, 204 otherwise), `/` placeholder until Task 4.
+  - `gpu.py`: parses `nvidia-smi --query-gpu=…` CSV into dicts; empty list
+    when the tool is missing.
+- **How it was verified:**
+  ```
+  uv run pytest -q
+  62 passed in 9.91s
+  ```
+  Tests first (collection errors), then implementation. API tests drive
+  the real app through `TestClient` with the stub sidecar and real worker
+  threads. `tests/test_sidecar_http.py` runs a stdlib `http.server`
+  imitating `sgl-omni` to check the exact payload, WAV write, 500-body
+  surfacing, and unreachable handling. One design correction found by a
+  test: `queue_position` now means "jobs ahead of you" (running + queued
+  earlier), not index among queued; spec updated. Review pass found a
+  delete-vs-worker race on queued jobs: `JobStore.delete` is now a
+  conditional SQL delete (`status != 'running'`) returning a bool, and a
+  worker whose row vanished mid-run discards its WAV instead of orphaning
+  it. `HttpSidecar.ready()` stops after a connection-level failure instead
+  of probing a second path.
+- **Limitations / follow-ups:** `timings` has `queue_wait_s`,
+  `inference_s`, `total_s`; the sidecar writes the file inside `generate`,
+  so a separate encode/write time is not observable from outside. Progress
+  while running is an estimate (capped at 0.95) because `sgl-omni` is
+  non-streaming. Refusing a closed localhost port takes ~2 s on Windows,
+  which is why the unreachable tests are the slowest.
+
 ## 2026-09-02 — Task 1: Foundation (settings, JSON logging, weights)
 
 - **What changed:** New `tunecast` package with three modules and their
