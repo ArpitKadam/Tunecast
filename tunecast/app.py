@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import secrets
 from dataclasses import dataclass
+from importlib.resources import files
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
@@ -114,6 +115,6 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
 
     @app.get("/", response_class=HTMLResponse)
     def ui():
-        return HTMLResponse("<!doctype html><title>Tunecast</title><h1>Tunecast</h1><p>UI arrives in Task 4.</p>")
+        return HTMLResponse(files("tunecast").joinpath("static/index.html").read_text(encoding="utf-8"))
 
     return app

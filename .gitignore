@@ -220,3 +220,6 @@ __marimo__/
 docs
 # Tunecast local stub data
 .data/
+
+# gstack browse session state
+.gstack/

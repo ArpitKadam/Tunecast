@@ -197,7 +197,13 @@ def test_info_has_model_and_gpu_list(client):
     assert info["max_concurrent"] == 1
 
 
-def test_root_serves_html(client):
+def test_root_serves_ui_with_attribution_and_warning(client):
     r = client.get("/")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    assert "MiniMax-Music3" in body
+    assert "Save WAV" in body
+    assert "deleted when this pod terminates" in body
+    assert "ngrok-skip-browser-warning" in body
+    assert "<script src=" not in body and "<link" not in body   # no external assets over the tunnel

@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tunecast</title>
+<style>
+  :root {
+    --deck: #26323a;
+    --panel: #33424b;
+    --line: #47585f;
+    --paper: #e8e3d6;
+    --muted: #a8b0ad;
+    --amber: #f2a93b;
+    --tally: #d9534f;
+    --ready: #7bc47f;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--deck); color: var(--paper);
+    font: 14px/1.6 var(--mono); padding-bottom: 4.5rem;
+  }
+  a { color: inherit; }
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 1.5rem;
+    padding: 1.1rem 1.5rem 0.9rem; border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; }
+  header .powered { color: var(--muted); }
+  header .powered strong { color: var(--paper); font-weight: 600; }
+  header .status { margin-left: auto; display: flex; gap: 1.25rem; color: var(--muted); }
+  .lamp::before {
+    content: ""; display: inline-block; width: 0.6em; height: 0.6em; border-radius: 50%;
+    background: var(--tally); margin-right: 0.45em; vertical-align: -0.02em;
+  }
+  .lamp.on::before { background: var(--ready); }
+
+  main { display: grid; grid-template-columns: minmax(20rem, 34rem) minmax(24rem, 1fr); gap: 2rem; padding: 1.5rem; }
+  @media (max-width: 62rem) { main { grid-template-columns: 1fr; } }
+  h2 { font-size: 1rem; font-weight: 600; margin: 0 0 0.9rem; }
+
+  .keybox { margin: 1.5rem; padding: 1rem 1.25rem; background: var(--panel); border-left: 4px solid var(--amber); }
+  .keybox p { margin: 0 0 0.6rem; }
+  .keybox form { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .keybox input { flex: 1 1 16rem; }
+
+  label { display: block; margin: 0.9rem 0 0.3rem; }
+  label .hint { color: var(--muted); float: right; }
+  textarea, input[type=text], input[type=number], input[type=password] {
+    width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 3px;
+    padding: 0.5rem 0.6rem; color: var(--paper);
+  }
+  textarea { min-height: 9.5rem; resize: vertical; line-height: 1.5; }
+  textarea[name=lyrics] { min-height: 14rem; }
+  input[type=range] { width: 100%; accent-color: var(--amber); }
+  .row { display: flex; gap: 1rem; }
+  .row > * { flex: 1; }
+  .actions { margin-top: 1.2rem; display: flex; align-items: center; gap: 1rem; }
+  .btn {
+    display: inline-block; background: var(--paper); color: var(--deck); border: 0; border-radius: 3px;
+    padding: 0.55rem 1rem; font-weight: 600; cursor: pointer; text-decoration: none;
+  }
+  .btn.quiet { background: transparent; color: var(--paper); border: 1px solid var(--line); font-weight: 500; }
+  .btn.danger { color: var(--tally); border-color: var(--tally); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .note { color: var(--muted); }
+  .error { color: var(--tally); }
+
+  .reel { list-style: none; margin: 0; padding: 0; }
+  .take {
+    display: grid; grid-template-columns: 4.5rem 1fr; gap: 0 1rem;
+    padding: 0.9rem 0; border-top: 1px solid var(--line);
+  }
+  .take:last-child { border-bottom: 1px solid var(--line); }
+  .take .num { color: var(--muted); }
+  .take .num b { display: block; color: var(--paper); font-weight: 600; font-size: 1.1rem; }
+  .take .head { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; align-items: baseline; }
+  .take .desc { flex: 1 1 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .take .meta { color: var(--muted); }
+  .take .state { font-weight: 600; }
+  .take.running .state { color: var(--amber); animation: blink 1.4s steps(2, start) infinite; }
+  .take.succeeded .state { color: var(--ready); }
+  .take.failed .state { color: var(--tally); }
+  @keyframes blink { to { visibility: hidden; } }
+  @media (prefers-reduced-motion: reduce) { .take.running .state { animation: none; } }
+
+  .meter { margin: 0.5rem 0 0.2rem; height: 0.7rem; display: grid; grid-template-columns: repeat(30, 1fr); gap: 2px; }
+  .meter i { display: block; background: var(--line); }
+  .meter i.lit { background: var(--amber); }
+  .take.succeeded .meter i.lit { background: var(--ready); }
+  .take .tools { margin-top: 0.6rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .take audio { width: 100%; margin-top: 0.5rem; }
+  .take .err { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 0.4rem; }
+  .empty { color: var(--muted); padding: 1rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+  .tally {
+    position: fixed; left: 0; right: 0; bottom: 0; padding: 0.75rem 1.5rem;
+    background: var(--tally); color: #fff; font-weight: 600;
+  }
+  @media (max-width: 40rem) { body { padding-bottom: 8rem; } .tally { padding: 0.6rem 1rem; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Tunecast</h1>
+  <span class="powered">Powered by <strong>MiniMax-Music3</strong></span>
+  <span class="status">
+    <span id="lamp-model" class="lamp">model</span>
+    <span id="lamp-tunnel" class="lamp">tunnel</span>
+    <span id="gpus"></span>
+  </span>
+</header>
+
+<section id="keybox" class="keybox" hidden>
+  <p id="keymsg">This server needs the shared API key. It is stored only in this browser.</p>
+  <form id="keyform">
+    <input type="password" name="key" autocomplete="off" placeholder="API key" required>
+    <button class="btn" type="submit">Use key</button>
+  </form>
+</section>
+
+<main id="main" hidden>
+  <section>
+    <h2>Take sheet</h2>
+    <form id="takeform">
+      <label for="lyrics">Lyrics <span class="hint">section tags like [Verse] and [Chorus] on their own lines</span></label>
+      <textarea id="lyrics" name="lyrics" required maxlength="20000" placeholder="[Verse]
+Morning light filtering through the pine
+[Chorus]
+Softly the world begins to breathe"></textarea>
+
+      <label for="description">Style <span class="hint">genre, tempo, key, instruments, vocals, mood</span></label>
+      <textarea id="description" name="description" required maxlength="10000" placeholder="A warm acoustic pop song with intimate female vocals, fingerpicked guitar, soft piano, and a gradual build into a wide final chorus."></textarea>
+
+      <div class="row">
+        <div>
+          <label for="duration">Length <span class="hint" id="durlabel">3:00</span></label>
+          <input type="range" id="duration" name="duration_s" min="1" max="360" value="180" aria-describedby="durlabel">
+        </div>
+        <div>
+          <label for="seed">Seed <span class="hint">blank picks one</span></label>
+          <input type="number" id="seed" name="seed" min="0" max="2147483647" step="1" placeholder="random">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" type="submit" id="submit">Start take</button>
+        <span class="note" id="formnote"></span>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Reel</h2>
+    <ol id="reel" class="reel"></ol>
+    <p id="empty" class="empty">No takes yet. Fill the take sheet and start one.</p>
+  </section>
+</main>
+
+<div class="tally" role="status">Outputs are deleted when this pod terminates. Save what you want to keep. Every save crosses the ngrok tunnel and counts toward its monthly 1 GB.</div>
+
+<script>
+(() => {
+  const KEY = "tunecast_key";
+  const $ = (id) => document.getElementById(id);
+  const reel = $("reel"), keybox = $("keybox"), main = $("main");
+  const rows = new Map();     // job id -> row element
+  const blobs = new Map();    // job id -> object URL
+  let pollTimer = null;
+
+  function key() { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } }
+  function setKey(v) { try { localStorage.setItem(KEY, v); } catch {} }
+  function forgetKey() { try { localStorage.removeItem(KEY); } catch {} }
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({
+      "Authorization": "Bearer " + key(),
+      "ngrok-skip-browser-warning": "1",
+    }, opts.headers || {});
+    const r = await fetch(path, Object.assign({}, opts, { headers }));
+    if (r.status === 401) { forgetKey(); showKeybox("That key was refused. Enter the API key set on the pod."); throw new Error("unauthorized"); }
+    return r;
+  }
+
+  function showKeybox(msg) {
+    if (msg) $("keymsg").textContent = msg;
+    keybox.hidden = false; main.hidden = true;
+    clearInterval(pollTimer); pollTimer = null;
+    keybox.querySelector("input").focus();
+  }
+
+  async function unlock() {
+    const r = await api("/info");
+    if (!r.ok) throw new Error("info " + r.status);
+    renderInfo(await r.json());
+    keybox.hidden = true; main.hidden = false;
+    await poll();
+    pollTimer = setInterval(poll, 3000);
+  }
+
+  $("keyform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setKey(new FormData(e.target).get("key").trim());
+    e.target.reset();
+    try { await unlock(); } catch {}
+  });
+
+  function renderInfo(info) {
+    $("gpus").textContent = (info.gpus || []).map(g =>
+      `GPU${g.index} ${(g.used_mb / 1024).toFixed(1)}/${(g.total_mb / 1024).toFixed(0)} GB`).join("  ")
+      || (info.stub ? "stub mode" : "");
+  }
+
+  async function ready() {
+    try {
+      const r = await fetch("/ready", { headers: { "ngrok-skip-browser-warning": "1" } });
+      const j = await r.json();
+      $("lamp-model").classList.toggle("on", !!j.model);
+      $("lamp-tunnel").classList.toggle("on", !!j.tunnel);
+    } catch {}
+  }
+
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+  $("duration").addEventListener("input", (e) => { $("durlabel").textContent = fmt(+e.target.value); });
+
+  $("takeform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = { lyrics: f.get("lyrics"), description: f.get("description"), duration_s: +f.get("duration_s") };
+    if (f.get("seed") !== "") body.seed = +f.get("seed");
+    $("submit").disabled = true; $("formnote").textContent = "";
+    try {
+      const r = await api("/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (r.status === 202) { $("formnote").textContent = "Queued."; await poll(); }
+      else { const d = await r.json().catch(() => ({})); $("formnote").innerHTML = ""; $("formnote").textContent = "Not started: " + (typeof d.detail === "string" ? d.detail : d.detail ? JSON.stringify(d.detail) : r.status); $("formnote").classList.add("error"); }
+    } catch (err) { $("formnote").textContent = "Not started: " + err.message; }
+    finally { $("submit").disabled = false; }
+  });
+
+  async function poll() {
+    let jobs;
+    try { const r = await api("/jobs?limit=50"); if (!r.ok) return; jobs = await r.json(); } catch { return; }
+    const seen = new Set();
+    const total = jobs.length;
+    jobs.forEach((job, i) => {
+      seen.add(job.id);
+      let row = rows.get(job.id);
+      if (!row) { row = makeRow(job); rows.set(job.id, row); }
+      updateRow(row, job, total - i);
+      if (reel.children[i] !== row) reel.insertBefore(row, reel.children[i] || null);
+    });
+    for (const [id, row] of rows) if (!seen.has(id)) { row.remove(); rows.delete(id); revoke(id); }
+    $("empty").hidden = total > 0;
+    ready();
+  }
+
+  function makeRow(job) {
+    const li = document.createElement("li");
+    li.className = "take";
+    li.innerHTML = `
+      <div class="num">take<b></b></div>
+      <div>
+        <div class="head"><span class="state"></span><span class="meta len"></span><span class="meta seed"></span><span class="meta when"></span><div class="desc"></div></div>
+        <div class="meter" aria-hidden="true">${"<i></i>".repeat(30)}</div>
+        <div class="note prog"></div>
+        <div class="err error" hidden></div>
+        <audio controls hidden></audio>
+        <div class="tools">
+          <button class="btn quiet load" type="button">Load audio</button>
+          <a class="btn quiet save" download hidden>Save WAV</a>
+          <button class="btn quiet danger del" type="button">Delete</button>
+        </div>
+      </div>`;
+    li.querySelector(".load").addEventListener("click", () => loadAudio(job.id, li));
+    li.querySelector(".del").addEventListener("click", (e) => del(job.id, e.target));
+    return li;
+  }
+
+  function updateRow(row, job, number) {
+    row.className = "take " + job.status;
+    row.querySelector(".num b").textContent = number;
+    const p = job.params, pr = job.progress, t = job.timings || {};
+    let state = job.status;
+    if (job.status === "queued") state = job.queue_position > 0 ? `queued, ${job.queue_position} ahead` : "queued, next up";
+    row.querySelector(".state").textContent = state;
+    row.querySelector(".len").textContent = fmt(p.duration_s);
+    row.querySelector(".seed").textContent = "seed " + p.seed;
+    row.querySelector(".when").textContent = new Date(job.created_at).toLocaleTimeString();
+    row.querySelector(".desc").textContent = p.description;
+
+    const lit = job.status === "succeeded" ? 30 : Math.round((pr.fraction || 0) * 30);
+    row.querySelectorAll(".meter i").forEach((seg, i) => seg.classList.toggle("lit", i < lit));
+    let prog = "";
+    if (job.status === "running") prog = `${fmt(pr.elapsed_s)} of about ${fmt(pr.estimated_total_s)} (estimate)`;
+    else if (job.status === "succeeded") prog = `rendered in ${fmt(t.inference_s || 0)}` + (t.queue_wait_s > 1 ? `, waited ${fmt(t.queue_wait_s)}` : "");
+    row.querySelector(".prog").textContent = prog;
+
+    const err = row.querySelector(".err");
+    err.hidden = !job.error; err.textContent = job.error || "";
+
+    const done = job.status === "succeeded";
+    row.querySelector(".load").hidden = !done || blobs.has(job.id);
+    row.querySelector(".save").hidden = !blobs.has(job.id);
+    row.querySelector(".del").disabled = job.status === "running";
+  }
+
+  async function loadAudio(id, row) {
+    const btn = row.querySelector(".load");
+    btn.disabled = true; btn.textContent = "Loading…";
+    try {
+      const r = await api(`/jobs/${id}/audio`);
+      if (!r.ok) throw new Error("audio " + r.status);
+      const url = URL.createObjectURL(await r.blob());
+      if (!rows.has(id)) { URL.revokeObjectURL(url); return; }   // row deleted while loading
+      blobs.set(id, url);
+      const audio = row.querySelector("audio"); audio.src = url; audio.hidden = false;
+      const save = row.querySelector(".save"); save.href = url; save.download = `${id}.wav`; save.hidden = false;
+      btn.hidden = true;
+    } catch (err) { btn.textContent = "Load failed, retry"; }
+    finally { btn.disabled = false; }
+  }
+
+  function revoke(id) { const u = blobs.get(id); if (u) { URL.revokeObjectURL(u); blobs.delete(id); } }
+
+  async function del(id, btn) {
+    if (btn.dataset.armed !== "1") { btn.dataset.armed = "1"; btn.textContent = "Really delete"; setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Delete"; }, 4000); return; }
+    try { const r = await api(`/jobs/${id}`, { method: "DELETE" }); if (r.status === 204) { revoke(id); await poll(); } else { btn.textContent = "Delete failed"; } } catch {}
+  }
+
+  ready(); setInterval(ready, 10000);
+  if (key()) unlock().catch(() => {}); else showKeybox();
+})();
+</script>
+</body>
+</html>

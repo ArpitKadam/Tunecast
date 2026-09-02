@@ -3,6 +3,50 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-09-03 — Task 4: Web UI
+
+- **What changed:** `tunecast/static/index.html` (one file, vanilla JS,
+  inline CSS, no external assets) served by `GET /` in `app.py`. One API
+  test replaced: `test_root_serves_ui_with_attribution_and_warning`.
+- **How it works:** On load the page checks `localStorage` for the key;
+  without one it shows the key panel. Every request goes through one
+  `api()` helper that adds `Authorization: Bearer` and
+  `ngrok-skip-browser-warning`; a 401 clears the key and re-shows the
+  panel with the reason. The take sheet posts to `/jobs`; the reel polls
+  `/jobs?limit=50` every 3 s and updates rows in place (keyed by id) so
+  audio players survive re-renders. Takes are numbered newest-first,
+  show state ("queued, 2 ahead", "running", "succeeded", "failed"),
+  length, seed, time, description, a 30-segment meter driven by the
+  server's progress fraction (labelled estimate while running), timings,
+  and the server's error text verbatim. Audio is fetched only when the
+  user clicks "Load audio" (each fetch crosses the ngrok 1 GB cap), then
+  played from a blob URL and offered as "Save WAV". Delete is two-click.
+  `/ready` drives two lamps; `/info` fills the GPU readout. "Powered by
+  MiniMax-Music3" sits in the header (licence) and a pinned red banner
+  states that outputs die with the pod.
+- **How it was verified:**
+  ```
+  uv run pytest -q
+  76 passed
+  ```
+  Driven with the gstack headless browser against the stub server on
+  port 8090: key panel → unlock → fill lyrics/style, length 1:00 → Start
+  take → "running" with amber meter and "0:01 of about 0:36 (estimate)"
+  → "succeeded, rendered in 0:03" → Load audio → player and Save WAV
+  visible → 390 px mobile layout. No console errors from the page. Then
+  through `https://sliding-ethically-beckham.ngrok-free.dev/`: ngrok's
+  interstitial appeared once, "Visit Site" → key panel → unlock → reel
+  listed the take, both lamps green. Screenshots in the session temp
+  directory (`tc-ui/ui-*.png`).
+  A stale server from the Task 3 run was found still holding 8090 and
+  serving the old placeholder; killed, rerun. Fixes from the screenshot
+  pass: no underline on the Save link, extra bottom padding on phones so
+  the banner never covers the last take.
+- **Limitations / follow-ups:** The interstitial is unavoidable on the
+  free ngrok plan and appears once per browser. Progress is the server's
+  estimate. Loading audio holds the whole WAV in browser memory (~23 MB
+  per 3-min song); fine for 3–4 takes.
+
 ## 2026-09-03 — Task 3: Supervisor, ngrok tunnel, readiness
 
 - **What changed:** `tunecast/boot.py` (the container entrypoint) and
