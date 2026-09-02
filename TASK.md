@@ -90,7 +90,7 @@ These override the clauses above. Reasoning in `DECISIONS.md`; full design in
 
 | # | Task | Status |
 | --- | --- | --- |
-| 1 | Foundation: project layout, settings, JSON logging, weights manifest + verify/download, tests | pending |
+| 1 | Foundation: project layout, settings, JSON logging, weights manifest + verify/download, tests | done 2026-09-02 |
 | 2 | Sidecar clients (HTTP + stub), SQLite job store, worker queue, GPU info, FastAPI routes + auth, API tests | pending |
 | 3 | Supervisor `tunecast.boot`, ngrok tunnel control, readiness, local stub run with real tunnel | pending |
 | 4 | Web UI (single static page) served at `/`, manual check through tunnel | pending |

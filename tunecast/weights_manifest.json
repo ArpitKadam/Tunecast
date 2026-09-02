@@ -1,0 +1,358 @@
+{
+ "repo_id": "MiniMaxAI/MiniMax-Music3",
+ "revision": "fbdf52fbaaca799592917417eb05f1899f1255ec",
+ "files": [
+  {
+   "path": ".gitattributes",
+   "size": 329
+  },
+  {
+   "path": "LICENSE",
+   "size": 7373
+  },
+  {
+   "path": "README.md",
+   "size": 11699
+  },
+  {
+   "path": "assets/minimax_ttm.wav",
+   "size": 36460944
+  },
+  {
+   "path": "condition_encoder/config.json",
+   "size": 292
+  },
+  {
+   "path": "condition_encoder/diffusion_pytorch_model.safetensors",
+   "size": 100671852
+  },
+  {
+   "path": "config.json",
+   "size": 107
+  },
+  {
+   "path": "dav.pth",
+   "size": 491817450
+  },
+  {
+   "path": "figures/Music3.png",
+   "size": 916912
+  },
+  {
+   "path": "figures/logo.svg",
+   "size": 8462
+  },
+  {
+   "path": "figures/music3.0-Architecture-Diagram.png",
+   "size": 1097623
+  },
+  {
+   "path": "flowmatching_vae.pth",
+   "size": 9828468476
+  },
+  {
+   "path": "language_model/config.json",
+   "size": 1596
+  },
+  {
+   "path": "language_model/generation_config.json",
+   "size": 158
+  },
+  {
+   "path": "language_model/model-00001-of-00004.safetensors",
+   "size": 4910103856
+  },
+  {
+   "path": "language_model/model-00002-of-00004.safetensors",
+   "size": 4915960352
+  },
+  {
+   "path": "language_model/model-00003-of-00004.safetensors",
+   "size": 4983068496
+  },
+  {
+   "path": "language_model/model-00004-of-00004.safetensors",
+   "size": 2359864688
+  },
+  {
+   "path": "language_model/model.safetensors.index.json",
+   "size": 32914
+  },
+  {
+   "path": "modular_model_index.json",
+   "size": 2391
+  },
+  {
+   "path": "qwen_7B/qwen3-8B-tokenizer-music/added_tokens.json",
+   "size": 880
+  },
+  {
+   "path": "qwen_7B/qwen3-8B-tokenizer-music/merges.txt",
+   "size": 1671853
+  },
+  {
+   "path": "qwen_7B/qwen3-8B-tokenizer-music/special_tokens_map.json",
+   "size": 612
+  },
+  {
+   "path": "qwen_7B/qwen3-8B-tokenizer-music/tokenizer.json",
+   "size": 11423806
+  },
+  {
+   "path": "qwen_7B/qwen3-8B-tokenizer-music/tokenizer_config.json",
+   "size": 10853
+  },
+  {
+   "path": "qwen_7B/qwen3-8B-tokenizer-music/vocab.json",
+   "size": 2776833
+  },
+  {
+   "path": "qwen_7B/qwen_7B/config.json",
+   "size": 1663
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00000-of-00048.safetensors",
+   "size": 1638400144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00001-of-00048.safetensors",
+   "size": 58720400
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00002-of-00048.safetensors",
+   "size": 285230720
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00003-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00004-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00005-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00006-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00007-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00008-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00009-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00010-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00011-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00012-of-00048.safetensors",
+   "size": 385894144
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00013-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00014-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00015-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00016-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00017-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00018-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00019-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00020-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00021-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00022-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00023-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00024-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00025-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00026-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00027-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00028-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00029-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00030-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00031-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00032-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00033-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00034-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00035-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00036-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00037-of-00048.safetensors",
+   "size": 385894152
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00038-of-00048.safetensors",
+   "size": 1739071824
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00039-of-00048.safetensors",
+   "size": 50463208
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00040-of-00048.safetensors",
+   "size": 16777480
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00041-of-00048.safetensors",
+   "size": 16777480
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00042-of-00048.safetensors",
+   "size": 109060744
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00043-of-00048.safetensors",
+   "size": 285230240
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00044-of-00048.safetensors",
+   "size": 285230240
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00045-of-00048.safetensors",
+   "size": 285230240
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model-00046-of-00048.safetensors",
+   "size": 184566536
+  },
+  {
+   "path": "qwen_7B/qwen_7B/model.safetensors.index.json",
+   "size": 39019
+  },
+  {
+   "path": "rvq_depth_decoder/config.json",
+   "size": 274
+  },
+  {
+   "path": "rvq_depth_decoder/diffusion_pytorch_model.safetensors",
+   "size": 1292055248
+  },
+  {
+   "path": "scheduler/scheduler_config.json",
+   "size": 483
+  },
+  {
+   "path": "scripts/end_to_end/minimax_ttm_test.py",
+   "size": 8584
+  },
+  {
+   "path": "tokenizer/chat_template.jinja",
+   "size": 4168
+  },
+  {
+   "path": "tokenizer/tokenizer.json",
+   "size": 11423801
+  },
+  {
+   "path": "tokenizer/tokenizer_config.json",
+   "size": 377
+  },
+  {
+   "path": "transformer/config.json",
+   "size": 294
+  },
+  {
+   "path": "transformer/diffusion_pytorch_model-00001-of-00002.safetensors",
+   "size": 4959921384
+  },
+  {
+   "path": "transformer/diffusion_pytorch_model-00002-of-00002.safetensors",
+   "size": 4767750800
+  },
+  {
+   "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+   "size": 42679
+  },
+  {
+   "path": "vocoder/config.json",
+   "size": 251
+  },
+  {
+   "path": "vocoder/diffusion_pytorch_model.safetensors",
+   "size": 216695272
+  }
+ ]
+}
