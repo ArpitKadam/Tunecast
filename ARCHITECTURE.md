@@ -41,7 +41,7 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | Tunnel | `tunecast/tunnel.py` | ngrok subprocess, bind check via local API, restart loop |
 | Supervisor | `tunecast/boot.py` | Boot sequence, sidecar process, readiness state, exit codes |
 | UI | `tunecast/static/index.html` | Single page, vanilla JS |
-| Client | `client/generate.py` | Submit, poll, save; end-to-end proof |
+| Client | `client/generate.py`, `client/example-*.txt` | Submit, poll with retries, save; end-to-end proof, plus worked Hindi and English examples |
 | Image | `Dockerfile`, `docker/requirements.txt`, `.dockerignore` | Digest-pinned base, four exact-pinned additions on system Python, ngrok binary by sha256, tini entrypoint |
 | CI | `.github/workflows/docker.yml` | Build and push on `main` / `v*` |
 
@@ -104,6 +104,7 @@ Boot order: env → weights → sidecar ready → job store/workers → **bind A
 - Nothing under `/workspace` is required to exist at boot; boot creates what it needs.
 - Secrets never appear in logs, the image, or the repo.
 - The image contains no model weights.
+- The sidecar always sees a `CUDA_VISIBLE_DEVICES` that matches the devices `nvidia-smi` reports, never the host's value.
 
 ## Directory map
 

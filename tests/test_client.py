@@ -73,3 +73,38 @@ def test_client_unreachable_exits_2(tmp_path):
     lyrics.write_text("la", encoding="utf-8")
     code = generate.main(["--url", "http://127.0.0.1:9", "--key", "k", "--lyrics-file", str(lyrics), "--description", "x", "--duration", "1"])
     assert code == 2
+
+
+def test_client_survives_transient_drops_while_polling(server, tmp_path, monkeypatch, capsys):
+    """A free ngrok tunnel drops connections occasionally; a three-minute poll must not die on one."""
+    real = generate.request
+    calls = {"n": 0}
+
+    def flaky(url, key, method="GET", body=None, timeout=60):
+        calls["n"] += 1
+        if calls["n"] in (2, 3, 5):        # two consecutive drops, then another later
+            raise OSError("Remote end closed connection without response")
+        return real(url, key, method, body, timeout)
+
+    monkeypatch.setattr(generate, "request", flaky)
+    lyrics = tmp_path / "lyrics.txt"
+    lyrics.write_text("[Verse]\nla la", encoding="utf-8")
+    out = tmp_path / "song.wav"
+
+    code = generate.main([
+        "--url", server, "--key", "k", "--lyrics-file", str(lyrics),
+        "--description", "lofi", "--duration", "2", "--out", str(out), "--poll", "0.2",
+    ])
+
+    assert code == 0
+    assert out.stat().st_size > 1000
+    assert "retrying" in capsys.readouterr().err
+
+
+def test_client_gives_up_after_repeated_drops(server, tmp_path, monkeypatch):
+    monkeypatch.setattr(generate, "request", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    lyrics = tmp_path / "lyrics.txt"
+    lyrics.write_text("la", encoding="utf-8")
+    code = generate.main(["--url", server, "--key", "k", "--lyrics-file", str(lyrics),
+                          "--description", "x", "--duration", "1", "--poll", "0.05"])
+    assert code == 2

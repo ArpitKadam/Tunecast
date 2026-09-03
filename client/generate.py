@@ -19,6 +19,10 @@ import urllib.error
 import urllib.request
 
 
+RETRIES = 5          # a free ngrok tunnel drops a connection now and then
+RETRY_WAIT_S = 3.0
+
+
 def request(url: str, key: str, method: str = "GET", body: dict | None = None, timeout: float = 60) -> bytes:
     headers = {"Authorization": f"Bearer {key}", "ngrok-skip-browser-warning": "1"}
     data = None
@@ -30,13 +34,33 @@ def request(url: str, key: str, method: str = "GET", body: dict | None = None, t
         return resp.read()
 
 
+def request_with_retries(url: str, key: str, method: str = "GET", body: dict | None = None,
+                         timeout: float = 60, attempts: int = RETRIES) -> bytes:
+    """Retry transport failures and 5xx. A dropped tunnel must not abandon a job that is still running
+    on the server. 4xx is not retried: a bad key or a bad request will not fix itself."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return request(url, key, method, body, timeout)
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == attempts:
+                raise
+            reason = f"HTTP {e.code}"
+        except (urllib.error.URLError, OSError) as e:
+            if attempt == attempts:
+                raise
+            reason = str(e)
+        print(f"connection problem ({reason}), retrying {attempt}/{attempts - 1}", file=sys.stderr)
+        time.sleep(RETRY_WAIT_S)
+    raise RuntimeError("unreachable")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate one song through a Tunecast server.")
     parser.add_argument("--url", required=True, help="server base URL, e.g. https://<domain> or http://127.0.0.1:8080")
     parser.add_argument("--key", default=os.environ.get("TUNECAST_API_KEY"), help="API key (default: $TUNECAST_API_KEY)")
     parser.add_argument("--lyrics-file", required=True, help="text file with lyrics; section tags like [Verse] on their own lines")
     parser.add_argument("--description", required=True, help="style caption: genre, tempo, key, instruments, vocals, mood")
-    parser.add_argument("--duration", type=int, default=180, help="seconds, 1-360 (default 180)")
+    parser.add_argument("--duration", type=int, default=180, help="maximum seconds, 1-360 (default 180); the model may end the song sooner")
     parser.add_argument("--seed", type=int, default=None, help="integer seed; omitted = server picks one")
     parser.add_argument("--out", default="song.wav", help="output WAV path (default song.wav)")
     parser.add_argument("--poll", type=float, default=5.0, help="seconds between status checks (default 5)")
@@ -66,9 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         time.sleep(args.poll)
         try:
-            job = json.loads(request(f"{base}/jobs/{job['id']}", args.key))
+            job = json.loads(request_with_retries(f"{base}/jobs/{job['id']}", args.key))
         except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
-            print(f"status check failed: {e}", file=sys.stderr)
+            print(f"status checks kept failing, giving up: {e}", file=sys.stderr)
+            print(f"the job may still be running; retrieve it later with: {base}/jobs/{job['id']}", file=sys.stderr)
             return 2
         status = job["status"]
         if status == "queued":
@@ -83,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             break
 
     try:
-        audio = request(f"{base}{job['audio_url']}", args.key, timeout=600)
+        audio = request_with_retries(f"{base}{job['audio_url']}", args.key, timeout=600)
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
         print(f"download failed: {e}", file=sys.stderr)
         return 2

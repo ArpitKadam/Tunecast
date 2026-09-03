@@ -56,9 +56,9 @@ tunecast.boot (PID 1 under tini)
 | Container image | `arpitkadam/tunecast:latest` (or a `sha-…` tag to pin) |
 | GPU | 2 × NVIDIA L40S (48 GB each) |
 | Container disk | 20 GB |
-| Volume disk | 80 GB, mount path `/workspace` |
+| Volume disk | 80 GB, mount path `/workspace` (see the warning below) |
 | Expose HTTP ports | `8080` |
-| CUDA filter | the image is CUDA 13.0.3 and its base declares `cuda>=13.0, driver>=535`. Select a host offering CUDA 13.0 or newer. Not yet confirmed on real hardware (Task 7) |
+| CUDA filter | the image is CUDA 13.0.3. Verified working on a host with driver 580.178.04 |
 | Start command | leave empty (image entrypoint) |
 
 Environment variables on the template:
@@ -75,9 +75,15 @@ Environment variables on the template:
 
 `.env.example` documents every variable and every baked constant.
 
-Why a volume disk and not a network volume: usage is a few songs a month, and a
-network volume costs about US$7/month idle for 100 GB, while re-downloading 57 GB at
-datacenter speed costs a few minutes of pod time. See `DECISIONS.md`.
+**Do not put the 80 GB on container disk.** RunPod's two disk fields are easy to
+transpose. Container disk is temporary and is wiped when the pod stops; volume
+disk is what actually gets mounted at `/workspace` and survives a stop. With
+volume disk at 0 the mount path is ignored, the weights land on temporary
+storage, and stopping the pod costs a full re-download.
+
+Why a pod volume disk and not a network volume: usage is a few songs a month, and
+a network volume costs about US$7/month idle for 100 GB, while re-downloading the
+weights takes under a minute of pod time (measured below). See `DECISIONS.md`.
 
 ## Per-session spin-up
 
@@ -86,9 +92,10 @@ datacenter speed costs a few minutes of pod time. See `DECISIONS.md`.
    `api_bound`, `tunnel_ready`, `api_ready`).
 2. When `api_ready` appears, open `https://sliding-ethically-beckham.ngrok-free.dev/`.
    ngrok's free plan shows an interstitial once per browser; click "Visit Site".
-3. Enter the API key once (stored in that browser only). Fill lyrics and style, pick a
-   length, start the take. The reel shows queue position, an estimated progress
-   meter, then a player and "Save WAV".
+3. Enter the API key once (stored in that browser only). Fill lyrics and style, set
+   the maximum length, start the take. The reel shows queue position, an estimated
+   progress meter, then a player and "Save WAV". The song ends when the lyrics run
+   out, so length is a ceiling rather than a target.
 4. Save your WAVs. Terminate the pod. Everything on `/workspace` is gone after that.
 
 `GET /ready` answers 200 only when both the model and the tunnel are up, 503
@@ -109,8 +116,12 @@ clients.
 | DELETE | `/jobs/{id}` | 204; 409 while running |
 | GET | `/info` | model, revision, sidecar, GPUs, limits |
 
-Limits: lyrics ≤ 20 000 chars, description ≤ 10 000, duration 1–360 s (the model's
-9000-frame cap at 25 fps), seed 0–2³¹−1. Output is 32 kHz 16-bit stereo WAV
+Limits: lyrics ≤ 20 000 chars, description ≤ 10 000, `duration_s` 1–360,
+seed 0–2³¹−1. **`duration_s` is a maximum, not a target.** It sets
+`max_new_tokens` to `duration_s × 25` frames; the model ends the song when it
+decides the lyrics are finished, which is usually sooner. A 180 s request with
+short lyrics produced 149 s of audio in the measured run. Write more lyrics to
+get a longer song; raising `duration_s` alone only raises the ceiling. Output is 32 kHz 16-bit stereo WAV
 (≈ 7.7 MB per minute). These are the parameters the official inference server
 accepts; sampling temperature, top-p/top-k and reference audio are rejected by it.
 
@@ -130,8 +141,13 @@ Arrangement). Lyrics carry `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]` and
 `[Outro]` tags on their own lines.
 
 Prints queue position and progress, saves the file, exits 0. Exit 1 means the
-server reported a failed job (message printed), exit 2 means auth or transport
-failure. Standard library only, runs on any Python 3.
+server reported a failed job (its message is printed), exit 2 means auth failure
+or a connection that stayed broken. Transport errors and 5xx responses are
+retried five times, three seconds apart, because a free ngrok tunnel drops a
+connection occasionally and the job keeps running on the server regardless. If
+it does give up, it prints the job URL so you can collect the audio later
+instead of paying to generate it again. Standard library only, runs on any
+Python 3.
 
 ## Local development (no GPU)
 
@@ -148,24 +164,192 @@ On Windows use `TUNECAST_PORT=8090` if something else owns 8080.
 
 ## Measured numbers
 
-Filled in from the real pod run (Task 7). Until then these are unmeasured.
+Measured on a 2 × L40S pod (driver 580.178.04) on 2026-09-03, image
+`sha-304cb59`.
 
 | Metric | Value |
 | --- | --- |
-| Fresh pod: boot → api_ready, including the 57.4 GB download | to be measured |
-| Model load (sidecar_start → sidecar_ready) | to be measured |
-| Inference time, 180 s song | to be measured |
-| GPU memory per card during a job | to be measured |
-| Cost per 180 s song at US$1.98/h | to be measured |
+| Fresh pod: boot → `api_ready`, including the 54 GB download | 147.9 s |
+| Weights download + verify | 57.2 s (≈ 950 MB/s) |
+| Model load (`sidecar_start` → `sidecar_ready`) | 90.2 s |
+| Inference | 153.9 s of compute for 149.2 s of audio (ratio 1.03) |
+| GPU 0 under load | 26,685 MiB, 96–97 % utilisation |
+| GPU 1 under load | 13,957 MiB, bursting to 100 % |
+| Cost per song at US$1.98/h | ≈ US$0.085 |
+| Cold start cost | ≈ US$0.08 |
 
-Image build on GitHub Actions: 14 min 16 s, 14.84 GB compressed, first run.
+A session of four songs is roughly 13 minutes of pod time, about US$0.42.
+Both GPUs are genuinely used: the autoregressive stage sits on GPU 0 and the
+flow-matching and waveform decode on GPU 1.
+
+Image build on GitHub Actions: 14–19 min, 14.84 GB compressed.
+
+## Pod runbook
+
+Every command below was used to bring up and verify the real pod. Pod-terminal
+commands run in RunPod's web terminal (Connect tab → **Enable web terminal**);
+the rest run on your machine.
+
+### 1. Watch the boot
+
+```bash
+while true; do
+  clear
+  du -sh /workspace/models/MiniMax-Music3 2>/dev/null || echo "weights: downloading"
+  python3 -c 'import json
+for l in open("/workspace/tunecast/logs/boot.jsonl"):
+    r = json.loads(l)
+    print(r["event"], r.get("since_boot_s",""), r.get("was",""), r.get("now",""), r.get("error",""))' 2>/dev/null
+  sleep 30
+done
+```
+
+Healthy sequence, with the timings measured on 2 × L40S:
+
+```
+env_ok 0.0
+weights_download_start
+weights_download_done
+weights_ready 57.2
+cuda_visible_devices_pinned  None 0,1
+sidecar_start 57.31
+sidecar_ready 147.37
+api_bound 147.39
+tunnel_start
+tunnel_ready 147.9
+api_ready 147.9
+```
+
+Ctrl-C at `api_ready`.
+
+### 2. Pre-flight checks
+
+The web terminal is a **different process from the supervisor and does not share
+its environment**, so read the API key out of the running process rather than
+expecting `$TUNECAST_API_KEY` to be set:
+
+```bash
+PID=$(pgrep -f "[t]unecast.boot" | head -1)
+KEY=$(python3 -c "import sys; env = open('/proc/' + sys.argv[1] + '/environ', 'rb').read().decode(); print(next(v for v in env.split(chr(0)) if v.startswith('TUNECAST_API_KEY='))[17:])" "$PID")
+
+nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv
+curl -s http://127.0.0.1:8080/ready; echo
+curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8080/info | python3 -m json.tool | head -25
+```
+
+`/ready` must print `{"model":true,"tunnel":true}`. After the model loads, both
+cards should show memory in use (measured: 25,283 MiB on GPU 0 and 13,947 MiB on
+GPU 1). If GPU 1 is near zero, the two-stage placement did not take effect.
+
+### 3. Cheap smoke test, inside the pod
+
+Ten seconds of audio with no tunnel involved, so a failure here is the model and
+not the network:
+
+```bash
+cat > /tmp/req.json <<'JSON'
+{"lyrics": "[Verse]\nchal diye hum", "description": "warm acoustic pop, female vocals, guitar", "duration_s": 10}
+JSON
+
+JOB=$(curl -s -X POST http://127.0.0.1:8080/jobs \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  --data-binary @/tmp/req.json \
+  | python3 -c 'import sys, json; print(json.load(sys.stdin)["id"])')
+echo "job $JOB"
+
+while true; do
+  curl -s -H "Authorization: Bearer $KEY" "http://127.0.0.1:8080/jobs/$JOB" \
+    | python3 -c 'import sys, json; j = json.load(sys.stdin); print(j["status"], j["progress"]["fraction"], j.get("error") or "")'
+  sleep 5
+done
+```
+
+Ctrl-C at `succeeded` or `failed`. On failure the `error` field carries the
+inference server's own message.
+
+### 4. A real song, from your machine
+
+This is the end-to-end path: client → ngrok → API → inference server.
+
+```bash
+cd /path/to/Tunecast
+set -a; . <(tr -d '\r' < .env); set +a
+uv run python client/generate.py \
+  --url https://sliding-ethically-beckham.ngrok-free.dev \
+  --key "$TUNECAST_API_KEY" \
+  --lyrics-file client/example-lyrics.txt \
+  --description "$(cat client/example-style.txt)" \
+  --duration 180 --seed 7 --out song-client.wav
+```
+
+Run this in the pod terminal a few times while it works, to catch peak load. It
+is the only figure the logs cannot reconstruct afterwards:
+
+```bash
+nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader
+```
+
+Measured under load: GPU 0 at 26,685 MiB and 96–97 %, GPU 1 at 13,957 MiB
+bursting to 100 %.
+
+### 5. Collect the evidence, then shut down
+
+```bash
+echo "=== GPUS";    nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv
+echo "=== DISK";    df -h /workspace | tail -1
+echo "=== WEIGHTS"; du -sh /workspace/models/MiniMax-Music3
+echo "=== BOOT";    cat /workspace/tunecast/logs/boot.jsonl
+echo "=== JOBS";    cat /workspace/tunecast/logs/jobs.jsonl
+echo "=== OUTPUTS"; ls -la /workspace/tunecast/outputs/
+```
+
+Save your WAVs first. **Stop** keeps the volume disk and its weights, so the next
+session skips the download and starts at the 90 s model load. **Terminate**
+destroys everything.
+
+## Song length is set by your lyrics
+
+`duration_s` is a ceiling, never a target. The model ends the song when the
+lyrics run out. From the measured run, roughly **0.21 seconds of audio per
+character of lyrics**:
+
+| Target | Approximate lyrics |
+| --- | --- |
+| 2 minutes | ~560 characters |
+| 3 minutes | ~850 characters |
+| 5 minutes | ~1,400 characters |
+
+Measured point: 697 characters of Hindi lyrics produced 149 seconds of audio.
+Leaving `duration_s` at 180, or even 360, is harmless; it only has to be high
+enough not to truncate the song.
+
+`client/example-lyrics.txt` (Hindi, female playback ballad) and
+`client/example-lyrics-en.txt` (English, hushed romantic ballad) are both sized
+for roughly three minutes, each with a matching structured caption in
+`client/example-style.txt` and `client/example-style-en.txt`.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| Pod runs but there is no `/workspace/tunecast/logs`, and `pgrep -f tunecast.boot` returns nothing | The template points at a stock RunPod image. Set **Container Image** to `arpitkadam/tunecast:latest`. A Docker Command override also suppresses our entrypoint, so clear that field. |
+| `torch.AcceleratorError: CUDA error: invalid device ordinal` | RunPod sets `CUDA_VISIBLE_DEVICES` to an empty string. sglang-omni reads that as an explicit "zero GPUs" configuration while the driver exposes none. Fixed since image `sha-304cb59`, which pins the variable from `nvidia-smi` and logs `cuda_visible_devices_pinned`. |
+| Weights download again after a stop | Container disk and volume disk are transposed. The 80 GB belongs on **volume** disk; container disk is temporary and is wiped on stop. |
+| `Tini is not running as PID 1` | Cosmetic since `sha-304cb59`, which runs `tini -s` so reaping works even though RunPod injects its own PID 1. |
+| Client prints `Remote end closed connection without response` | The ngrok agent reconnected. The supervisor restarts it with backoff, so retry. Confirm with `grep -c tunnel_down /workspace/tunecast/logs/boot.jsonl`, and check `/ready` from anywhere. |
+| `Python was not found` on Windows | The pod-terminal snippets use `python3`, which Windows does not have. Run those inside the pod and use the client script from your machine. |
+| Pod exits immediately with code 1 | A missing or misspelled environment variable. The log line names it. |
+| Browser shows an ngrok interstitial | Free-plan behaviour, once per browser. Click "Visit Site". The API and the client bypass it with the `ngrok-skip-browser-warning` header. |
 
 ## Limitations
 
 - ngrok free plan: 1 GB transfer per month. A 3-minute WAV is ~23 MB, so roughly
   40 downloads a month. The UI only fetches audio when you click "Load audio".
 - The interstitial page cannot be removed on the free plan.
-- Progress while a job runs is an estimate; the inference server does not stream.
+- Progress while a job runs is an estimate; the inference server does not stream,
+  and the estimator needs a few full-length jobs before it is accurate. Its first
+  prediction after a short test job will be far too high.
+- Song length cannot be set directly. It follows from lyric quantity; see above.
 - Outputs are not persisted beyond the pod. Prune keeps the last 200 succeeded
   jobs within a session.
 - Weight integrity is checked by file sizes plus a marker, not by hashing.

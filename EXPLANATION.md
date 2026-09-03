@@ -3,7 +3,7 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
-## 2026-09-03 — Task 7 (in progress): first pod run, two defects fixed
+## 2026-09-03 — Task 7: pod verification run
 
 - **What happened:** The first real pod on 2 × L40S (driver 580.178.04)
   downloaded all 57.4 GB of weights successfully, then the inference
@@ -35,7 +35,51 @@ reading cold. Why-questions belong in `DECISIONS.md`.
   the three host states seen or plausible: set-and-empty (the observed
   RunPod value), a UUID string, and unset, plus the no-`nvidia-smi` case.
   Not yet re-run on a pod.
-- **Still open:** the end-to-end pod run and its measured numbers.
+- **Second pod run, on image `sha-304cb59`:** clean boot and a real song.
+  Stage timings from `boot.jsonl`: `env_ok` 0.0 s, weights downloaded and
+  verified by 57.2 s (54 GB at roughly 950 MB/s), `sidecar_ready` 147.4 s
+  (90.2 s of model load), `api_bound` 147.39 s, `tunnel_ready` and
+  `api_ready` 147.9 s. Total cold start 147.9 s including the full
+  download. `cuda_visible_devices_pinned` logged `None → 0,1`, confirming
+  the fix. After load, GPU 0 held 25,283 MiB and GPU 1 13,947 MiB, so the
+  two-stage placement worked. `/ready` returned
+  `{"model":true,"tunnel":true}` and `/info` reported both cards.
+  A 180 s request through the ngrok tunnel with the Hindi example lyrics
+  produced 149.2 s of audio in 153.9 s of inference (19,096,136 bytes,
+  ratio 1.03 s of compute per second of audio, about US$0.085 at
+  US$1.98/h). Under load GPU 0 ran 96–97 % at 26,685 MiB and GPU 1 burst to
+  100 % at 13,957 MiB.
+- **Third defect, documentation:** the run returned 149 s for a 180 s
+  request. That is correct behaviour, not a bug: `duration_s` maps to
+  `max_new_tokens`, which is a ceiling, and the autoregressive model ends
+  the song when the lyrics are exhausted. The README, the UI label and the
+  client's `--duration` help all implied an exact length and now say
+  maximum, with the measured example given.
+- **Fourth defect, operational:** the first attempt had container disk 80 GB
+  and volume disk 0 GB, so `/workspace` was never mounted and the weights
+  sat on temporary storage. README now warns about transposing those two
+  fields.
+- **Fifth defect, client fragility:** the ngrok tunnel dropped the client's
+  polling connection twice during real three-minute jobs, and the client
+  treated any transport error as fatal, abandoning a job that was still
+  running on the pod. `request_with_retries` now retries transport errors
+  and 5xx five times at three-second intervals while polling and
+  downloading; 4xx and the initial submit are not retried. When it does
+  give up it prints the job URL so the audio can be collected later rather
+  than regenerated. Two tests cover it: recovery from intermittent drops,
+  and giving up after persistent ones.
+- **Behavioural finding, song length:** length follows lyric quantity, not
+  `duration_s`. The measured point is 697 characters producing 149.2 s,
+  about 0.21 s of audio per character. README now carries a conversion
+  table, and the example lyric files are sized for roughly three minutes.
+- **Documentation:** README gained a Pod runbook holding every command
+  actually used to bring up and verify the pod (boot watch, pre-flight with
+  the process-environment key trick, in-pod smoke test, the end-to-end
+  client run, GPU sampling under load, evidence capture), a section on
+  lyric-driven length, and a troubleshooting table covering all five
+  defects found in this task.
+- **Still open:** a song generated through the web UI rather than the
+  client, for completeness of the spec's UI deliverable.
 
 ## 2026-09-03 — Task 6: Client script and README
 

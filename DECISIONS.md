@@ -3,6 +3,12 @@
 Append-only, newest first. Each entry records what was chosen, what else was
 on the table, and the evidence that settled it.
 
+## 2026-09-03 — Client retries transport failures, not 4xx
+- **Decision:** `client/generate.py` retries transport errors and 5xx responses five times, three seconds apart, while polling and downloading. It does not retry 4xx, and the initial submit stays single-shot. On giving up it prints the job URL.
+- **Alternatives considered:** failing fast on any error (the original behaviour); retrying everything including submit; an exponential backoff.
+- **Why:** The free ngrok tunnel dropped the polling connection twice during real three-minute jobs. The job itself keeps running on the pod, so aborting the client throws away paid GPU work for a blip that resolves in seconds. Retrying a submit risks queueing the same song twice; retrying a 401 or a 422 cannot succeed.
+- **Consequences:** A genuinely dead server now takes about 15 seconds to report instead of failing immediately. Acceptable for a tool that already waits minutes.
+
 ## 2026-09-03 — Install onto the base image's system Python, not an isolated venv
 - **Decision:** The Dockerfile adds `sglang-omni==0.1.4`, `fastapi`, `uvicorn`, `huggingface_hub` (all exact-pinned in `docker/requirements.txt`) to the base image's system Python with `uv pip install --system`. Every build writes the fully resolved set to `/app/docker/installed.txt` and CI prints it.
 - **Alternatives considered:** A fresh `/opt/venv` from a cross-platform `uv pip compile` lock (the original plan); `--system-site-packages` venv.

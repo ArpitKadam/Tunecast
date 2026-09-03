@@ -96,4 +96,4 @@ These override the clauses above. Reasoning in `DECISIONS.md`; full design in
 | 4 | Web UI (single static page) served at `/`, manual check through tunnel | done 2026-09-03 |
 | 5 | Dockerfile, GPU dependency lock, GitHub Actions workflow, first image on Docker Hub | done 2026-09-03 (run 33687738008, `sha-7ddf5a7`) |
 | 6 | RunPod template (in README), client script, README, EXPLANATION entry | done 2026-09-03 |
-| 7 | Pod verification run (owner-executed), measured numbers into README/EXPLANATION, fixes | pending |
+| 7 | Pod verification run (owner-executed), measured numbers into README/EXPLANATION, fixes | done 2026-09-03 |

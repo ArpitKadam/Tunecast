@@ -1,0 +1,16 @@
+Global Metadata
+Basic Attributes: Quiet contemporary singer-songwriter ballad in English with an ambient pop edge. Slow, around 60 to 70 BPM, with a loose rubato feel where the piano and the voice pull gently against a steady underlying pulse rather than locking to it.
+Global Emotional Progression: Restraint is the point. The choruses open harmonically rather than getting louder, and nothing ever rises past a soft dynamic; warmth accumulates instead of volume. The bridge is the quietest moment, close to silence. The last chorus returns with more instruments but no more force, and the outro thins to one instrument and the decay of the room.
+Application Scenarios & Imagery: Late evening indoors, rain on the window, two people who have stopped needing to talk.
+Sonics & Production Profile: Close and dry at the source, inside a generous but uncluttered reverb so the space is audible without smearing the words. Warm mid-range from felt piano and nylon guitar, soft low end, airy rather than bright on top. Very light compression preserves each note's decay, and mechanical noise such as piano felt, string squeak and breath is left in deliberately.
+
+Vocal Details
+Vocal Gender & Timbre: A single close-mic'd solo voice in a comfortable low-to-mid register, soft, breathy and slightly grainy, sounding as though it is a few inches from the listener. No choir, no doubling of the lead.
+Vocal Style: Almost spoken at the start of each verse, opening into a gentle sustained line in the choruses without ever belting. Soft consonants, phrase ends allowed to trail off, audible breaths between lines. Emotion comes from restraint rather than power.
+Harmony/Backing Vocals: None until the final chorus, where a single wordless harmony a third above enters at very low level. The bridge is sung completely alone.
+Vocal FX: One long, quiet hall reverb and nothing else. No delay, no pitch correction, no widening.
+
+Arrangement
+Instrument Lifecycle Description: A felt-muted upright piano is the harmonic foundation from first bar to last, slow arpeggios in the verses opening into sustained voicings in the choruses. A nylon-string guitar joins at the second verse with quiet fingerpicking and natural harmonics at phrase ends. A bowed double bass enters under the second chorus with long low notes and never becomes rhythmic. A soft synth pad sits beneath everything from the first chorus onward.
+Groove & Foundation Progression: There is no drum kit anywhere in the track. The only percussion is a brushed snare played with fingers, entering under the second chorus at a whisper and dropping out again for the bridge. Movement comes from the piano arpeggios and the phrasing of the voice, not from a beat.
+Embellishments, Textures & Spatial FX: Room tone and piano action stay audible. Transitions are made by an instrument entering or leaving, never by a cymbal swell or riser. The outro removes guitar, bass and pad one at a time until only piano and reverb tail remain.
