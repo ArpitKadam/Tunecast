@@ -118,10 +118,16 @@ accepts; sampling temperature, top-p/top-k and reference audio are rejected by i
 
 ```bash
 python client/generate.py --url https://sliding-ethically-beckham.ngrok-free.dev \
-  --key "$TUNECAST_API_KEY" --lyrics-file lyrics.txt \
-  --description "warm acoustic pop, intimate female vocals, fingerpicked guitar" \
+  --key "$TUNECAST_API_KEY" --lyrics-file client/example-lyrics.txt \
+  --description "$(cat client/example-style.txt)" \
   --duration 180 --seed 7 --out song.wav
 ```
+
+`client/example-lyrics.txt` and `client/example-style.txt` are a worked example:
+a Hindi romantic ballad for a female playback voice, with the style written as
+the structured caption MiniMax Music 3 expects (Global Metadata, Vocal Details,
+Arrangement). Lyrics carry `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]` and
+`[Outro]` tags on their own lines.
 
 Prints queue position and progress, saves the file, exits 0. Exit 1 means the
 server reported a failed job (message printed), exit 2 means auth or transport

@@ -10,7 +10,8 @@ def test_dockerfile_pins_base_digest_tini_and_entrypoint():
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert f"FROM hongccc/sglang-omni:dev@{BASE_DIGEST}" in text
     assert "tini" in text
-    assert 'ENTRYPOINT ["tini", "--", "python3", "-m", "tunecast.boot"]' in text
+    # -s so reaping works even though RunPod injects its own PID 1
+    assert 'ENTRYPOINT ["tini", "-s", "--", "python3", "-m", "tunecast.boot"]' in text
     assert "EXPOSE 8080" in text
 
 

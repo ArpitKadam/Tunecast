@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import subprocess
 import sys
@@ -48,14 +49,32 @@ def build_sidecar_command(settings: Settings) -> list[str]:
     return cmd
 
 
+def sidecar_env(logger: logging.Logger) -> dict[str, str]:
+    """sglang-omni derives its GPU layout from CUDA_VISIBLE_DEVICES: it counts the entries and, with two
+    or more, places the acoustic stage on ordinal 1. A host value that disagrees with the devices actually
+    present (RunPod injects UUIDs, and the count can be wrong) makes it address a GPU that does not exist,
+    which fails as `CUDA error: invalid device ordinal`. Pin the variable to the real devices instead."""
+    env = dict(os.environ)
+    gpus = query_gpus()
+    if not gpus:
+        log_event(logger, "gpu_query_unavailable", level=logging.WARNING, cuda_visible_devices=env.get("CUDA_VISIBLE_DEVICES"))
+        return env
+    pinned = ",".join(str(i) for i in range(len(gpus)))
+    if env.get("CUDA_VISIBLE_DEVICES") != pinned:
+        log_event(logger, "cuda_visible_devices_pinned", was=env.get("CUDA_VISIBLE_DEVICES"), now=pinned, gpu_count=len(gpus))
+    env["CUDA_VISIBLE_DEVICES"] = pinned
+    return env
+
+
 class SidecarProcess:
     def __init__(self, settings: Settings, logger: logging.Logger):
         self.command = build_sidecar_command(settings)
         self.logger = logger
+        self.env = sidecar_env(logger)
         self.proc: subprocess.Popen | None = None
 
     def start(self) -> None:
-        self.proc = subprocess.Popen(self.command)   # stdio inherited: sidecar logs land in the pod log
+        self.proc = subprocess.Popen(self.command, env=self.env)   # stdio inherited: sidecar logs land in the pod log
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
@@ -152,7 +171,12 @@ class Supervisor:
 
                 self._sidecar_proc = SidecarProcess(s, logger)
                 self._sidecar_proc.start()
-                stage("sidecar_start", command=" ".join(self._sidecar_proc.command))
+                stage(
+                    "sidecar_start",
+                    command=" ".join(self._sidecar_proc.command),
+                    cuda_visible_devices=self._sidecar_proc.env.get("CUDA_VISIBLE_DEVICES"),
+                    gpus=query_gpus(),
+                )
                 sidecar = HttpSidecar(f"http://127.0.0.1:{s.sidecar_port}", s.model_id)
                 if not self._sidecar_proc.wait_ready(sidecar, SIDECAR_READY_TIMEOUT_S, self._stop):
                     if self._stop.is_set():

@@ -1,3 +1,4 @@
+import logging
 import json
 import socket
 import threading
@@ -114,8 +115,11 @@ def test_sidecar_wait_ready_returns_early_when_stop_requested():
     from tunecast.boot import SidecarProcess
     from tunecast.sidecar import HttpSidecar
 
+    import os
+
     proc = SidecarProcess.__new__(SidecarProcess)
     proc.command = [sys.executable, "-c", "import time; time.sleep(60)"]
+    proc.env = dict(os.environ)
     proc.proc = None
     proc.start()
     stop = threading.Event()
@@ -147,3 +151,24 @@ def test_supervisor_stops_cleanly_when_stop_requested_during_boot(tmp_path, monk
     assert time.monotonic() - started < 15
     boot_log = (tmp_path / "tunecast" / "logs" / "boot.jsonl").read_text(encoding="utf-8")
     assert "shutdown_requested" in boot_log
+
+
+def test_sidecar_env_pins_cuda_visible_devices_to_real_gpu_count(tmp_path, monkeypatch):
+    """sglang-omni infers its GPU layout from CUDA_VISIBLE_DEVICES; a host value that disagrees
+    with the devices actually present makes it place a stage on a nonexistent ordinal."""
+    from tunecast import boot
+    from tunecast.boot import SidecarProcess
+
+    settings = load_settings({"TUNECAST_API_KEY": "k", "NGROK_ENABLED": "0", "TUNECAST_DATA_DIR": str(tmp_path)})
+
+    monkeypatch.setattr(boot, "query_gpus", lambda: [{"index": 0}, {"index": 1}])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-deadbeef")
+    assert SidecarProcess(settings, logging.getLogger("test")).env["CUDA_VISIBLE_DEVICES"] == "0,1"
+
+    monkeypatch.setattr(boot, "query_gpus", lambda: [{"index": 0}])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1")
+    assert SidecarProcess(settings, logging.getLogger("test")).env["CUDA_VISIBLE_DEVICES"] == "0"
+
+    monkeypatch.setattr(boot, "query_gpus", lambda: [])
+    proc = SidecarProcess(settings, logging.getLogger("test"))
+    assert proc.env["CUDA_VISIBLE_DEVICES"] == "0,1"   # nvidia-smi unavailable: leave the host value alone
