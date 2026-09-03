@@ -162,7 +162,16 @@ def test_sidecar_env_pins_cuda_visible_devices_to_real_gpu_count(tmp_path, monke
     settings = load_settings({"TUNECAST_API_KEY": "k", "NGROK_ENABLED": "0", "TUNECAST_DATA_DIR": str(tmp_path)})
 
     monkeypatch.setattr(boot, "query_gpus", lambda: [{"index": 0}, {"index": 1}])
+
+    # Observed on RunPod: set but empty. sglang-omni reads that as an explicit "zero GPUs"
+    # configuration and the CUDA driver exposes no devices at all.
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    assert SidecarProcess(settings, logging.getLogger("test")).env["CUDA_VISIBLE_DEVICES"] == "0,1"
+
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-deadbeef")
+    assert SidecarProcess(settings, logging.getLogger("test")).env["CUDA_VISIBLE_DEVICES"] == "0,1"
+
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     assert SidecarProcess(settings, logging.getLogger("test")).env["CUDA_VISIBLE_DEVICES"] == "0,1"
 
     monkeypatch.setattr(boot, "query_gpus", lambda: [{"index": 0}])

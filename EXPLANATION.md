@@ -3,6 +3,40 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-09-03 — Task 7 (in progress): first pod run, two defects fixed
+
+- **What happened:** The first real pod on 2 × L40S (driver 580.178.04)
+  downloaded all 57.4 GB of weights successfully, then the inference
+  server died on startup with `torch.AcceleratorError: CUDA error: invalid
+  device ordinal`, and the container crash-looped.
+- **Root cause:** RunPod sets `CUDA_VISIBLE_DEVICES` to an **empty
+  string**, not unset. `sglang_omni.models.minimax_music3.config`
+  branches on `os.environ.get("CUDA_VISIBLE_DEVICES") is not None`, so an
+  empty value takes the "explicitly configured" path, splits to `[""]`,
+  filters out the blank, and concludes zero visible GPUs. The CUDA driver
+  independently reads the same empty value as "expose no devices", so the
+  stage was placed on an ordinal the driver did not have. A shell in the
+  pod reported two GPUs because RunPod's web terminal is a separate
+  process with a different environment from the container's PID 1.
+- **Fixes:**
+  - `tunecast/boot.py` gained `sidecar_env()`, which reads the real device
+    list from `nvidia-smi` and pins `CUDA_VISIBLE_DEVICES` to
+    `0,1,…,N-1` before launching the sidecar, logging the old and new
+    values as `cuda_visible_devices_pinned`. When `nvidia-smi` is
+    unavailable it leaves the host value untouched and logs
+    `gpu_query_unavailable`. `sidecar_start` now also records the pinned
+    value and the GPU list.
+  - The entrypoint became `tini -s`, because RunPod injects its own PID 1
+    and the pod log showed `Tini is not running as PID 1 ... zombie
+    reaping won't work`. The `-s` flag registers tini as a child subreaper
+    regardless of its PID.
+- **How it was verified:** `uv run pytest -q`, 85 passed.
+  `test_sidecar_env_pins_cuda_visible_devices_to_real_gpu_count` covers
+  the three host states seen or plausible: set-and-empty (the observed
+  RunPod value), a UUID string, and unset, plus the no-`nvidia-smi` case.
+  Not yet re-run on a pod.
+- **Still open:** the end-to-end pod run and its measured numbers.
+
 ## 2026-09-03 — Task 6: Client script and README
 
 - **What changed:** `client/generate.py`, a rewritten `README.md`, and
