@@ -114,9 +114,7 @@ Tunecast/
 ├── tests/               pytest, stub mode only
 ├── client/generate.py
 ├── docker/              requirements.txt: additions on top of the base image
-├── docs/
-│   ├── runpod-template.md
-│   └── superpowers/{specs,plans}/
+├── docs/               gitignored: superpowers/{specs,plans}/
 ├── Dockerfile
 ├── pyproject.toml, uv.lock
 ├── .github/workflows/docker.yml

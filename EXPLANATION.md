@@ -3,6 +3,52 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-09-03 — Task 6: Client script and README
+
+- **What changed:** `client/generate.py`, a rewritten `README.md`, and
+  `tests/test_client.py`. The RunPod template lives in the README rather
+  than a separate `docs/runpod-template.md`, because `docs/` is gitignored
+  in this repo and the template belongs with the setup instructions.
+- **How it works:** `client/generate.py` is standard library only, so it
+  runs on any Python 3 without installing anything. It reads lyrics from a
+  file, posts the job, prints queue position and estimated progress while
+  polling, downloads the WAV, and prints the server's inference time and
+  the wall time. Exit 0 saved, 1 the server reported a failed job with its
+  message, 2 auth or transport failure. Every request carries the bearer
+  key and `ngrok-skip-browser-warning`. `--key` defaults to
+  `$TUNECAST_API_KEY`.
+  The README covers the architecture, licence obligations, one-time setup
+  (Docker Hub secrets, ngrok authtoken vs API key, API key, RunPod
+  template table with env vars), per-session spin-up, the API table with
+  real limits, the client script, local stub development, an empty
+  measured-numbers table for Task 7 to fill, limitations, teardown, the
+  serverless note, and the boot exit codes.
+- **How it was verified:**
+  ```
+  uv run pytest -q
+  84 passed
+  ```
+  `tests/test_client.py` runs the real supervisor in stub mode on a free
+  port and drives the actual client `main()` against it: a 2 s song is
+  submitted, polled, downloaded, and checked as a 64 000-frame WAV; a
+  wrong key and an unreachable host both exit 2.
+  End-to-end through the real tunnel
+  (`https://sliding-ethically-beckham.ngrok-free.dev`, stub sidecar):
+  ```
+  submitted 20260902-222422-046b83 (seed 7, 20s)
+  succeeded: inference 1.016s, wall 5s, saved song.wav (2,560,044 bytes)
+  wav 2 ch 32000 Hz 20.0 s
+  wrong key -> submit failed: HTTP 401 -> exit 2
+  ```
+  README claims were checked against the code: stage names, exit codes
+  1–6, route list, the four request limits, and 32 kHz stereo 16-bit
+  (7.7 MB per minute, 23 MB for 180 s) all match. One false claim was
+  removed: the CUDA-filter row had said driver compatibility was verified
+  in the pod notes, which is Task 7 work, so it now says unconfirmed.
+- **Limitations / follow-ups:** The measured-numbers table is empty until
+  the pod run. The subagent review of this task could not run (provider
+  rate limit), so the accuracy pass above was done directly.
+
 ## 2026-09-03 — Task 5: Image and CI
 
 - **What changed:** `Dockerfile`, `.dockerignore`, `docker/requirements.txt`,
