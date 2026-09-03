@@ -98,7 +98,7 @@ Boot order: env → weights → sidecar ready → job store/workers → **bind A
 ## Invariants
 
 - No request except `/health`, `/ready`, and `/` succeeds without the bearer key.
-- `POST /jobs` never waits on inference.
+- `POST /jobs` never waits on inference; a job outlives any client, and is recoverable by id until its pod dies.
 - `/ready` is 200 only while both the sidecar and the tunnel are up.
 - A job that stops running for any reason ends `succeeded` or `failed`, never stuck.
 - Nothing under `/workspace` is required to exist at boot; boot creates what it needs.

@@ -75,9 +75,16 @@ reading cold. Why-questions belong in `DECISIONS.md`.
 - **Documentation:** README gained a Pod runbook holding every command
   actually used to bring up and verify the pod (boot watch, pre-flight with
   the process-environment key trick, in-pod smoke test, the end-to-end
-  client run, GPU sampling under load, evidence capture), a section on
-  lyric-driven length, and a troubleshooting table covering all five
-  defects found in this task.
+  client run, GPU sampling under load, job recovery, evidence capture), a
+  section on lyric-driven length, and a troubleshooting table covering all
+  five defects found in this task. The recovery step explains why a job
+  survives its client: submission is asynchronous, the job row lives in
+  SQLite on the volume disk and the worker thread runs regardless of who is
+  listening, so a dropped tunnel never costs the work. It gives the
+  status-by-ID and download-by-ID commands, a way to list recent jobs when
+  the ID is lost, and explains each flag, including why `tr -d` on `.env`
+  matters (a trailing carriage return from a Windows editor becomes part of
+  the key and produces a 401).
 - **Still open:** a song generated through the web UI rather than the
   client, for completeness of the spec's UI deliverable.
 

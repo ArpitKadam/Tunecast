@@ -292,7 +292,74 @@ nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader
 Measured under load: GPU 0 at 26,685 MiB and 96–97 %, GPU 1 at 13,957 MiB
 bursting to 100 %.
 
-### 5. Collect the evidence, then shut down
+### 5. Recover a job when the client dies
+
+**Why this situation exists.** Generation is asynchronous by design. `POST /jobs`
+writes the job to SQLite on the volume disk, hands it to a worker thread, and
+returns 202 immediately. The worker keeps going regardless of who is listening.
+The client is only a poller, so nothing that happens on your machine or on the
+network can stop a job: a dropped ngrok connection, Ctrl-C, a closed laptop, or
+the client giving up after its retries all leave the job running and its WAV
+written to `/workspace/tunecast/outputs/`.
+
+**So never resubmit a job that looked like it failed in transit.** Resubmitting
+pays for the same song twice, and on a US$1.98/hour pod each three-minute song is
+about US$0.085 of GPU time. Look it up by ID instead.
+
+The ID is printed the moment you submit, on the `submitted <id> (seed …)` line,
+which is worth keeping until the file is on disk.
+
+```bash
+cd /path/to/Tunecast
+set -a; . <(tr -d '\r' < .env); set +a
+JOB=20260903-034812-0a6346
+
+curl -s -H "Authorization: Bearer $TUNECAST_API_KEY" -H 'ngrok-skip-browser-warning: 1' \
+  "https://sliding-ethically-beckham.ngrok-free.dev/jobs/$JOB" | python -m json.tool
+```
+
+What each part is doing:
+
+- `set -a; . <(tr -d '\r' < .env); set +a` loads `.env` and exports every variable
+  in it. `tr -d '\r'` strips the carriage returns that Windows editors leave
+  behind, which would otherwise become part of the key and produce a 401.
+- The bearer header carries the API key; every route except `/health`, `/ready`
+  and the UI page requires it.
+- `ngrok-skip-browser-warning` suppresses ngrok's free-plan interstitial, which
+  would otherwise return an HTML page instead of your JSON.
+- `python -m json.tool` pretty-prints. On Windows it is `python`; inside the pod
+  it is `python3`.
+
+Read `status` in the output. `succeeded` means the audio is waiting, `running`
+means keep waiting, `failed` means the `error` field explains why.
+
+Once it says `succeeded`, download it:
+
+```bash
+curl -s -H "Authorization: Bearer $TUNECAST_API_KEY" -H 'ngrok-skip-browser-warning: 1' \
+  -o song-client-en.wav "https://sliding-ethically-beckham.ngrok-free.dev/jobs/$JOB/audio"
+```
+
+`-o` writes the body to a file rather than to the terminal, which matters because
+the response is a multi-megabyte WAV.
+
+**If you lost the ID**, list recent jobs, newest first:
+
+```bash
+curl -s -H "Authorization: Bearer $TUNECAST_API_KEY" -H 'ngrok-skip-browser-warning: 1' \
+  "https://sliding-ethically-beckham.ngrok-free.dev/jobs?limit=10" \
+  | python -c "import sys, json; [print(j['id'], j['status'], j['params']['duration_s'], j['created_at']) for j in json.load(sys.stdin)]"
+```
+
+Or just reload the web UI, which lists the same jobs with a player and a
+**Save WAV** button on each finished one.
+
+Jobs survive a pod restart as records but not as work in progress: anything left
+`running` or `queued` when the supervisor restarts is marked `failed` with the
+error `pod restarted`, because its worker thread is gone. Finished songs stay
+downloadable as long as the volume disk lives.
+
+### 6. Collect the evidence, then shut down
 
 ```bash
 echo "=== GPUS";    nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv
@@ -336,7 +403,7 @@ for roughly three minutes, each with a matching structured caption in
 | `torch.AcceleratorError: CUDA error: invalid device ordinal` | RunPod sets `CUDA_VISIBLE_DEVICES` to an empty string. sglang-omni reads that as an explicit "zero GPUs" configuration while the driver exposes none. Fixed since image `sha-304cb59`, which pins the variable from `nvidia-smi` and logs `cuda_visible_devices_pinned`. |
 | Weights download again after a stop | Container disk and volume disk are transposed. The 80 GB belongs on **volume** disk; container disk is temporary and is wiped on stop. |
 | `Tini is not running as PID 1` | Cosmetic since `sha-304cb59`, which runs `tini -s` so reaping works even though RunPod injects its own PID 1. |
-| Client prints `Remote end closed connection without response` | The ngrok agent reconnected. The supervisor restarts it with backoff, so retry. Confirm with `grep -c tunnel_down /workspace/tunecast/logs/boot.jsonl`, and check `/ready` from anywhere. |
+| Client prints `Remote end closed connection without response` | The free ngrok tunnel dropped a connection. The client retries five times before giving up. **The job keeps running on the pod either way**, so recover it by ID rather than resubmitting; see "Recover a job when the client dies". Confirm the tunnel with `grep -c tunnel_down /workspace/tunecast/logs/boot.jsonl` and by checking `/ready`. |
 | `Python was not found` on Windows | The pod-terminal snippets use `python3`, which Windows does not have. Run those inside the pod and use the client script from your machine. |
 | Pod exits immediately with code 1 | A missing or misspelled environment variable. The log line names it. |
 | Browser shows an ngrok interstitial | Free-plan behaviour, once per browser. Click "Visit Site". The API and the client bypass it with the `ngrok-skip-browser-warning` header. |
