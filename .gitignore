@@ -223,6 +223,3 @@ docs
 
 # gstack browse session state
 .gstack/
-
-# Generated audio
-*.wav
