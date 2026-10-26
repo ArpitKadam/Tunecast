@@ -1,8 +1,9 @@
-"""FastAPI surface: bearer auth, async job submission, status, audio download, readiness, UI."""
+"""FastAPI surface: bearer auth, async job submission, status, labels, audio download, readiness, UI and its assets."""
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import hmac
 import io
 import json
@@ -10,11 +11,11 @@ import secrets
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints
 
 from .config import Settings
 from .gpu import query_gpus
@@ -25,10 +26,12 @@ MAX_DURATION_S = 360
 MAX_LYRICS_CHARS = 20_000
 MAX_DESCRIPTION_CHARS = 10_000
 MAX_SEED = 2**31 - 1
+MAX_TITLE_CHARS = 120
 # ponytail: fixed hint, not derived from the estimator; a slot opens when the running take ends (minutes, estimate is a guess)
 RETRY_AFTER_S = 30
 REQUEST_ID_PATTERN = r"^[A-Za-z0-9_-]{8,128}$"
 EXPERIMENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"     # also matches job IDs, which name an experiment by default
+STATIC_ASSETS = {"app.js": "text/javascript", "app.css": "text/css"}   # the only files /static serves
 
 
 @dataclass
@@ -47,6 +50,14 @@ class JobRequest(BaseModel):
     experiment_id: str | None = Field(default=None, pattern=EXPERIMENT_ID_PATTERN)
 
 
+class JobLabels(BaseModel):
+    """PATCH /jobs/{id}: only the fields sent change. A blank or null title clears it."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=MAX_TITLE_CHARS)] = None
+    favorite: StrictBool = False
+
+
 def _app_version() -> str:
     try:
         return version("tunecast")
@@ -55,7 +66,7 @@ def _app_version() -> str:
 
 
 def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: Sidecar, state: ReadyState) -> FastAPI:
-    app = FastAPI(title="Tunecast", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Tunecast", openapi_url=None, docs_url=None, redoc_url=None)
     key_bytes = settings.api_key.encode("utf-8")
     gpus = query_gpus()
     # Recorded with every job. Settings only by name, never the API key, ngrok token or HF token.
@@ -71,6 +82,11 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
         "gpu_count": len(gpus),
         "gpu_names": [g["name"] for g in gpus],
     }
+    static = files("tunecast").joinpath("static")
+    assets = {name: static.joinpath(name).read_bytes() for name in STATIC_ASSETS}
+    # the page names its assets by content hash, so a cached copy from an older image is never reused
+    asset_version = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]
+    page = static.joinpath("index.html").read_text(encoding="utf-8").replace("{{asset_version}}", asset_version)
 
     def require_key(authorization: str | None = Header(default=None)) -> None:
         scheme, _, token = (authorization or "").partition(" ")
@@ -153,6 +169,16 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
     def get_job(job_id: str):
         return job_to_dict(load_job(job_id), store, runner.estimator)
 
+    @app.patch("/jobs/{job_id}", dependencies=auth)
+    def label_job(job_id: str, req: JobLabels):
+        load_job(job_id)
+        fields = req.model_dump(exclude_unset=True)
+        if "title" in fields:
+            fields["title"] = fields["title"] or None
+        if fields and store.update(job_id, **fields) == 0:
+            raise HTTPException(status_code=404, detail="job not found")
+        return job_to_dict(load_job(job_id), store, runner.estimator)
+
     @app.get("/jobs/{job_id}/audio", dependencies=auth)
     def audio(job_id: str):
         job = load_job(job_id)
@@ -188,6 +214,13 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
 
     @app.get("/", response_class=HTMLResponse)
     def ui():
-        return HTMLResponse(files("tunecast").joinpath("static/index.html").read_text(encoding="utf-8"))
+        return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
+
+    @app.get("/static/{name}")
+    def static_asset(name: str, v: str | None = None):
+        if name not in assets:
+            raise HTTPException(status_code=404, detail="not found")
+        cache = "public, max-age=31536000, immutable" if v == asset_version else "no-cache"
+        return Response(assets[name], media_type=STATIC_ASSETS[name], headers={"Cache-Control": cache})
 
     return app

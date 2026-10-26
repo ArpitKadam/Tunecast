@@ -1,4 +1,8 @@
+import csv
+import hashlib
+import io
 import logging
+import re
 import threading
 import time
 import wave
@@ -6,6 +10,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from tunecast.app import ReadyState, create_app
@@ -104,11 +109,13 @@ def test_submit_returns_202_and_shape(client):
         "params", "progress", "timings", "gpu", "audio_url", "error",
         "audio_duration_s", "audio_sample_rate", "audio_channels", "audio_bytes", "request_id",
         "estimate", "real_time_factor", "parent_job_id", "experiment_id", "model_revision", "config_snapshot",
+        "title", "favorite",
     }
     assert job["status"] in ("queued", "running")
     assert job["params"] == {**BODY, "format": "wav"}
     assert job["audio_url"] is None
     assert job["error"] is None
+    assert job["title"] is None and job["favorite"] is False
     assert job["audio_duration_s"] is None
     assert set(job["progress"]) == {"elapsed_s", "estimated_total_s", "fraction"}
 
@@ -214,16 +221,134 @@ def test_info_has_model_and_gpu_list(client):
     assert info["max_concurrent"] == 1
 
 
+ASSET_LINK = re.compile(r'(?:src|href)="([^"]*)"')
+LOCAL_ASSET = re.compile(r"/static/app\.(?:js|css)\?v=[0-9a-f]{12}")
+
+
+def asset_version(client) -> str:
+    return re.search(r"/static/app\.js\?v=([0-9a-f]{12})", client.get("/").text).group(1)
+
+
 def test_root_serves_ui_with_attribution_and_warning(client):
     r = client.get("/")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
+    assert r.headers["cache-control"] == "no-cache"
     body = r.text
     assert "MiniMax-Music3" in body
     assert "Save WAV" in body
     assert "deleted when this pod terminates" in body
-    assert "ngrok-skip-browser-warning" in body
-    assert "<script src=" not in body and "<link" not in body   # no external assets over the tunnel
+    assert "{{" not in body
+    script = client.get("/static/app.js").text
+    assert "ngrok-skip-browser-warning" in script
+    # only same-origin assets over the tunnel: every link is a fragment or a versioned /static file, no CDN or font host
+    links = ASSET_LINK.findall(body)
+    assert {"/static/app.js", "/static/app.css"} <= {link.split("?")[0] for link in links}
+    assert all(link == "#" or LOCAL_ASSET.fullmatch(link) for link in links), links
+    for text in (body, script, client.get("/static/app.css").text):
+        assert "://" not in text and "@import" not in text and "url(" not in text
+
+
+def test_static_assets_are_public_typed_and_cached_by_content_version(client):
+    v = asset_version(client)
+    js = client.get(f"/static/app.js?v={v}")
+    css = client.get(f"/static/app.css?v={v}")
+    assert js.status_code == css.status_code == 200
+    assert js.headers["content-type"] == "text/javascript; charset=utf-8"
+    assert css.headers["content-type"] == "text/css; charset=utf-8"
+    assert js.headers["cache-control"] == css.headers["cache-control"] == "public, max-age=31536000, immutable"
+    for stale in ("/static/app.js", "/static/app.js?v=000000000000"):
+        assert client.get(stale).headers["cache-control"] == "no-cache"
+    for text in (js.text, css.text):
+        assert KEY not in text and "Bearer test" not in text
+    for missing in ("/static/index.html", "/static/nope.js", "/static/..%2Fapp.py", "/static/"):
+        assert client.get(missing).status_code == 404, missing
+
+
+def test_asset_version_is_the_hash_of_the_served_assets(client):
+    served = client.get("/static/app.js").content + client.get("/static/app.css").content
+    assert asset_version(client) == hashlib.sha256(served).hexdigest()[:12]
+
+
+def test_labels_work_on_queued_running_and_finished_jobs(gated):
+    client, sidecar, _, running = gated
+    queued = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    r = client.patch(f"/jobs/{running}", json={"title": "  Night drive  "}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["title"] == "Night drive" and r.json()["favorite"] is False and r.json()["status"] == "running"
+    assert client.patch(f"/jobs/{queued}", json={"favorite": True}, headers=AUTH).json()["favorite"] is True
+    sidecar.gate.set()
+    done = wait_for(client, running, "succeeded")
+    assert done["title"] == "Night drive"      # the runner's status updates do not touch labels
+    both = client.patch(f"/jobs/{running}", json={"title": "Final", "favorite": True}, headers=AUTH).json()
+    assert (both["title"], both["favorite"], both["status"]) == ("Final", True, "succeeded")
+    listed = {j["id"]: j for j in client.get("/jobs", headers=AUTH).json()}
+    assert (listed[running]["title"], listed[running]["favorite"]) == ("Final", True)
+    assert listed[queued]["favorite"] is True and listed[queued]["title"] is None
+
+
+def test_labels_clear_and_partial_updates(client):
+    job_id = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    client.patch(f"/jobs/{job_id}", json={"title": "Take one", "favorite": True}, headers=AUTH)
+    assert client.patch(f"/jobs/{job_id}", json={"favorite": False}, headers=AUTH).json()["title"] == "Take one"
+    assert client.patch(f"/jobs/{job_id}", json={"title": "   "}, headers=AUTH).json()["title"] is None
+    client.patch(f"/jobs/{job_id}", json={"title": "again"}, headers=AUTH)
+    assert client.patch(f"/jobs/{job_id}", json={"title": None}, headers=AUTH).json()["title"] is None
+    unchanged = client.patch(f"/jobs/{job_id}", json={}, headers=AUTH)
+    assert unchanged.status_code == 200 and unchanged.json()["favorite"] is False
+
+
+@pytest.mark.parametrize("bad", [
+    {"title": "x" * 121},
+    {"title": 5},
+    {"favorite": "yes"},
+    {"favorite": 1},
+    {"favorite": None},
+    {"status": "succeeded"},
+    {"params": {"seed": 1}},
+])
+def test_labels_are_validated(client, bad):
+    job_id = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    assert client.patch(f"/jobs/{job_id}", json=bad, headers=AUTH).status_code == 422
+    job = client.get(f"/jobs/{job_id}", headers=AUTH).json()
+    assert (job["title"], job["favorite"]) == (None, False)
+
+
+def test_title_is_trimmed_before_the_length_limit(client):
+    job_id = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    r = client.patch(f"/jobs/{job_id}", json={"title": "  " + "x" * 120 + "  "}, headers=AUTH)
+    assert r.status_code == 200 and r.json()["title"] == "x" * 120
+    assert client.get(f"/jobs/{job_id}", headers=AUTH).json()["title"] == "x" * 120
+    assert client.patch(f"/jobs/{job_id}", json={"title": "x" * 121}, headers=AUTH).status_code == 422
+
+
+def test_labels_need_the_key_and_an_existing_job(client):
+    job_id = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    assert client.patch(f"/jobs/{job_id}", json={"favorite": True}).status_code == 401
+    assert client.patch(f"/jobs/{job_id}", json={"favorite": True}, headers={"Authorization": "Bearer nope"}).status_code == 401
+    assert client.patch(f"/jobs/{job_id}", json={"favorite": "bad"}).status_code == 401
+    assert client.patch("/jobs/nope", json={"favorite": True}, headers=AUTH).status_code == 404
+    assert client.get(f"/jobs/{job_id}", headers=AUTH).json()["favorite"] is False
+
+
+def test_labels_survive_an_idempotent_replay(client):
+    first = client.post("/jobs", json=BODY, headers=keyed()).json()
+    client.patch(f"/jobs/{first['id']}", json={"title": "Keeper", "favorite": True}, headers=AUTH)
+    replay = client.post("/jobs", json=BODY, headers=keyed())
+    assert replay.status_code == 200
+    assert replay.json()["id"] == first["id"]
+    assert (replay.json()["title"], replay.json()["favorite"]) == ("Keeper", True)
+    assert client.post("/jobs", json={**BODY, "seed": 8}, headers=keyed()).status_code == 409
+    assert len(client.get("/jobs", headers=AUTH).json()) == 1
+
+
+def test_labels_are_in_the_experiment_export(client):
+    job_id = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    client.patch(f"/jobs/{job_id}", json={"title": "Exported, with comma", "favorite": True}, headers=AUTH)
+    rows = client.get(f"/experiments/{job_id}/export", headers=AUTH).json()
+    assert (rows[0]["title"], rows[0]["favorite"]) == ("Exported, with comma", True)
+    csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/experiments/{job_id}/export?format=csv", headers=AUTH).text)))
+    assert (csv_rows[0]["title"], csv_rows[0]["favorite"]) == ("Exported, with comma", "True")
 
 
 class CountingSidecar(StubSidecar):
@@ -454,3 +579,21 @@ def test_cancelling_a_running_job_is_409_and_explains_why(gated):
     assert "cannot be cancelled" in r.json()["detail"]
     sidecar.gate.set()
     wait_for(client, running, "succeeded")
+
+
+def test_only_the_documented_routes_are_public_and_the_schema_is_not_served(client):
+    public = {"/health", "/ready", "/", "/static/{name}"}
+    checked = 0
+    for route in client.app.routes:
+        assert isinstance(route, APIRoute), f"{route!r}: a mount or other route needs a deliberate auth decision"
+        if route.path in public:
+            continue
+        url = re.sub(r"\{[^}]+\}", "x", route.path)
+        for method in route.methods - {"HEAD", "OPTIONS"}:
+            r = client.request(method, url)
+            assert r.status_code == 401, (method, route.path, r.status_code)
+            checked += 1
+    assert checked >= 8
+    assert client.get("/openapi.json").status_code == 404
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404

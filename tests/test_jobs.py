@@ -221,6 +221,23 @@ def test_store_migrates_db_from_before_request_ids(tmp_path):
     JobStore(db, tmp_path / "outputs")      # reopening an already migrated DB is a no-op
 
 
+def test_old_db_gains_unset_labels_that_then_persist(tmp_path):
+    db = tmp_path / "jobs.db"
+    old = sqlite3.connect(db)
+    old.execute(OLD_SCHEMA)
+    old.execute("INSERT INTO jobs (id, status, created_at, params) VALUES ('old-1', 'succeeded', '2026-01-01T00:00:00.000Z', ?)", (json.dumps(PARAMS),))
+    old.commit()
+    old.close()
+
+    store = JobStore(db, tmp_path / "outputs")
+    assert (store.get("old-1").title, store.get("old-1").favorite) == (None, False)
+    assert store.update("old-1", title="Kept", favorite=True) == 1
+    got = JobStore(db, tmp_path / "outputs").get("old-1")
+    assert (got.title, got.favorite) == ("Kept", True)
+    with pytest.raises(ValueError):
+        store.update("old-1", request_hash="x")      # labels are updatable, identity columns still are not
+
+
 def test_create_with_request_id_roundtrip_and_lookup(store):
     job = store.create(PARAMS, "req-0123456789", fingerprint(PARAMS))
     assert store.get_by_request_id("req-0123456789") == job

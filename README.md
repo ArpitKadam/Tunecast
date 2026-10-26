@@ -413,7 +413,9 @@ for roughly three minutes, each with a matching structured caption in
 ## Limitations
 
 - ngrok free plan: 1 GB transfer per month. A 3-minute WAV is ~23 MB, so roughly
-  40 downloads a month. The UI only fetches audio when you click "Load audio".
+  40 downloads a month. The UI fetches a take's audio, with the key, only when you press
+  Play, Save WAV or flip A/B; choosing takes in the A/B selects fetches nothing. Each
+  loaded take stays in browser memory as a blob until it leaves the list or the page reloads.
 - The interstitial page cannot be removed on the free plan.
 - Progress while a job runs is an estimate; the inference server does not stream,
   and the estimator needs a few full-length jobs before it is accurate. Its first

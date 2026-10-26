@@ -49,17 +49,20 @@ CREATE TABLE IF NOT EXISTS jobs (
     parent_job_id TEXT,
     experiment_id TEXT,
     model_revision TEXT,
-    config_snapshot TEXT
+    config_snapshot TEXT,
+    title TEXT,
+    favorite INTEGER
 )
 """
 _AUDIO_COLUMNS = {"audio_duration_s": "REAL", "audio_sample_rate": "INTEGER", "audio_channels": "INTEGER", "audio_bytes": "INTEGER"}
 _LINEAGE_COLUMNS = {"parent_job_id": "TEXT", "experiment_id": "TEXT", "model_revision": "TEXT", "config_snapshot": "TEXT"}
-_ADDED_COLUMNS = {**_AUDIO_COLUMNS, "request_id": "TEXT", "request_hash": "TEXT", **_LINEAGE_COLUMNS}
+_LABEL_COLUMNS = {"title": "TEXT", "favorite": "INTEGER"}     # set by the listener, never part of the request fingerprint
+_ADDED_COLUMNS = {**_AUDIO_COLUMNS, "request_id": "TEXT", "request_hash": "TEXT", **_LINEAGE_COLUMNS, **_LABEL_COLUMNS}
 # NULLs never collide, so submissions without a request ID keep working
 _REQUEST_ID_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS jobs_request_id ON jobs (request_id)"
 _EXPERIMENT_INDEX = "CREATE INDEX IF NOT EXISTS jobs_experiment_id ON jobs (experiment_id)"
 _JSON_FIELDS = {"params", "timings", "gpu"}
-_UPDATABLE = {"status", "started_at", "finished_at", "timings", "gpu", "error", *_AUDIO_COLUMNS}
+_UPDATABLE = {"status", "started_at", "finished_at", "timings", "gpu", "error", *_AUDIO_COLUMNS, *_LABEL_COLUMNS}
 
 
 def utcnow() -> str:
@@ -120,6 +123,8 @@ class Job:
     experiment_id: str | None = None
     model_revision: str | None = None
     config_snapshot: dict | None = None
+    title: str | None = None
+    favorite: bool = False
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -133,8 +138,9 @@ class Job:
             timings=json.loads(row["timings"]),
             gpu=json.loads(row["gpu"]),
             error=row["error"],
-            **{col: row[col] for col in _ADDED_COLUMNS if col != "config_snapshot"},
+            **{col: row[col] for col in _ADDED_COLUMNS if col not in ("config_snapshot", "favorite")},
             config_snapshot=json.loads(row["config_snapshot"]) if row["config_snapshot"] else None,
+            favorite=bool(row["favorite"]),
         )
 
 
@@ -149,7 +155,7 @@ class JobStore:
         self._db.execute(_SCHEMA)
         have = {r["name"] for r in self._db.execute("PRAGMA table_info(jobs)")}
         for col, sql_type in _ADDED_COLUMNS.items():
-            if col not in have:     # DB created before audio validation, request IDs or lineage
+            if col not in have:     # DB created before audio validation, request IDs, lineage or titles
                 self._db.execute(f"ALTER TABLE jobs ADD COLUMN {col} {sql_type}")
         self._db.execute(_REQUEST_ID_INDEX)
         self._db.execute(_EXPERIMENT_INDEX)
@@ -419,7 +425,7 @@ def real_time_factor(job: Job) -> float | None:
 
 
 EXPORT_FIELDS = (
-    "job_id", "experiment_id", "parent_job_id", "status", "created_at", "started_at", "finished_at",
+    "job_id", "title", "favorite", "experiment_id", "parent_job_id", "status", "created_at", "started_at", "finished_at",
     "seed", "duration_s_requested", "lyrics", "description", "model_revision",
     "queue_s", "inference_s", "audio_duration_s", "real_time_factor", "peak_gpu_mb", "error", "config_snapshot",
 )
@@ -430,6 +436,8 @@ def export_row(job: Job) -> dict:
     peaks = [g["peak_used_mb"] for g in job.gpu if "peak_used_mb" in g]
     return {
         "job_id": job.id,
+        "title": job.title,
+        "favorite": job.favorite,
         "experiment_id": job.experiment_id,
         "parent_job_id": job.parent_job_id,
         "status": job.status,
@@ -498,4 +506,6 @@ def job_to_dict(job: Job, store: JobStore, estimator: Estimator) -> dict:
         "experiment_id": job.experiment_id,
         "model_revision": job.model_revision,
         "config_snapshot": job.config_snapshot,
+        "title": job.title,
+        "favorite": job.favorite,
     }

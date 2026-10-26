@@ -35,12 +35,12 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | Logging | `tunecast/log.py` | JSON formatter, stdout + file sinks, secret redaction, `log_event` helper |
 | Weights | `tunecast/weights.py`, `tunecast/weights_manifest.json` | Manifest verify, idempotent `snapshot_download`, completion marker |
 | Sidecar | `tunecast/sidecar.py` | `HttpSidecar` (sgl-omni client) and `StubSidecar` (sine WAV) behind one interface; `inspect_wav` validates every response and `generate` returns `AudioInfo` |
-| Jobs | `tunecast/jobs.py` | SQLite `JobStore` (nullable `audio_duration_s`, `audio_sample_rate`, `audio_channels`, `audio_bytes`, `request_id` under a UNIQUE index, `request_hash`, `parent_job_id`, `experiment_id` (indexed; old rows backfilled to their own id), `model_revision`, `config_snapshot`; all added in place to older DBs), `JobRunner` worker threads, queue position, progress estimate, prune |
+| Jobs | `tunecast/jobs.py` | SQLite `JobStore` (nullable `audio_duration_s`, `audio_sample_rate`, `audio_channels`, `audio_bytes`, `request_id` under a UNIQUE index, `request_hash`, `parent_job_id`, `experiment_id` (indexed; old rows backfilled to their own id), `model_revision`, `config_snapshot`, `title`, `favorite` (labels: outside the fingerprint, updatable); all added in place to older DBs), `JobRunner` worker threads, queue position, progress estimate, prune |
 | GPU info | `tunecast/gpu.py` | `nvidia-smi` query, empty list when absent; `GpuPeakSampler` (daemon thread, ~1 s poll, started before `generate`, stopped in `finally`) records peak whole-GPU memory per job |
-| API | `tunecast/app.py` | FastAPI factory, bearer auth, routes, static UI |
+| API | `tunecast/app.py` | FastAPI factory, bearer auth, routes, `PATCH /jobs/{id}` labels, the page and its two content-versioned assets (`/static/app.js`, `/static/app.css`) |
 | Tunnel | `tunecast/tunnel.py` | ngrok subprocess, bind check via local API, restart loop |
 | Supervisor | `tunecast/boot.py` | Boot sequence, sidecar process, readiness state, exit codes |
-| UI | `tunecast/static/index.html` | Single page, vanilla JS |
+| UI | `tunecast/static/index.html`, `app.js`, `app.css` | Markup and `<template>`s; one ES module holding the shared state (jobs, current track, A/B picks, Lab draft, pending submit), the Player and Lab tab panels, one `<audio>` in a player dock outside the panels, polling and key handling; styles |
 | Client | `client/generate.py`, `client/example-*.txt` | Submit, poll with retries, save; end-to-end proof, plus worked Hindi and English examples |
 | Image | `Dockerfile`, `docker/requirements.txt`, `.dockerignore` | Digest-pinned base, four exact-pinned additions on system Python, ngrok binary by sha256, tini entrypoint |
 | CI | `.github/workflows/docker.yml` | `test` job on push, pull request and dispatch (unit tests, then the Playwright e2e suite on chromium); `build` (image build and push to Docker Hub) `needs: test` and never runs on pull requests |
@@ -51,7 +51,7 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 2. Worker thread pops the id, skips it if the job is gone or no longer `queued` (cancelled), claims it with a conditional update (0 rows = cancelled meanwhile), `JobStore.update(status="running", started_at=…)`, builds the sidecar payload (`input`, `instructions`, `seed`, `max_new_tokens = duration_s × 25`, `response_format`, `stream=false`), POSTs to `http://127.0.0.1:8000/v1/audio/speech`.
 3. The body must be non-empty and complete (Content-Length enforced); `inspect_wav` checks the RIFF/WAVE header, fmt (PCM, float or EXTENSIBLE) and a data chunk of whole frames that fits in the bytes received. Only then is it written atomically (`.part`, `os.replace`) to `outputs/<id>.wav`. Duration, sample rate, channels and size are stored; `timings`, `gpu` captured; status `succeeded`. Any failure (bad body, truncation, timeout, disk error) → no file left, status `failed`, `error` filled.
 4. `GET /jobs/{id}` returns the row plus computed `queue_position` (jobs ahead: running + queued earlier) and `progress` (estimate, capped 0.95 while running). Live jobs also carry `estimate {seconds, confidence: low|medium}`; finished jobs carry `real_time_factor` (inference seconds ÷ real audio seconds). The `Estimator` learns from `audio_duration_s`, not the requested ceiling.
-5. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`. `GET /experiments/{id}/export?format=json|csv` returns the experiment's jobs in the flat `EXPORT_FIELDS` schema (404 unknown experiment, 422 bad format).
+5. `PATCH /jobs/{id}` `{title?, favorite?}` sets labels on a job in any status (404 unknown, 422 invalid, `extra=forbid`). The UI loads `/`, then `/static/app.css?v=<hash>` and `/static/app.js?v=<hash>`; audio is fetched with the key into a blob only on Play, Save WAV or an A/B flip, then played by the one dock element. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`. `GET /experiments/{id}/export?format=json|csv` returns the experiment's jobs in the flat `EXPORT_FIELDS` schema (404 unknown experiment, 422 bad format).
 6. Prune deletes the oldest succeeded jobs beyond `TUNECAST_KEEP_LAST`.
 
 ## Key interfaces
@@ -98,7 +98,8 @@ Boot order: env → weights → sidecar ready → job store/workers → **bind A
 
 ## Invariants
 
-- No request except `/health`, `/ready`, and `/` succeeds without the bearer key.
+- No request except `/health`, `/ready`, `/` and `/static/app.js|app.css` succeeds without the bearer key. The two assets hold no secrets and are named by content hash. OpenAPI/docs routes are disabled; a test walks every route and asserts 401 without a key.
+- The page has exactly one `<audio>`, outside the tab panels. Panels are hidden, never removed, so tab switches keep playback and drafts.
 - `POST /jobs` never waits on inference; a job outlives any client, and is recoverable by id until its pod dies.
 - `/ready` is 200 only while both the sidecar and the tunnel are up.
 - A job that stops running for any reason ends `succeeded` or `failed`, never stuck.
@@ -114,7 +115,7 @@ Boot order: env → weights → sidecar ready → job store/workers → **bind A
 ```
 Tunecast/
 ├── tunecast/            application package (see Components)
-│   └── static/index.html
+│   └── static/          index.html, app.js, app.css
 ├── tests/               pytest, stub mode only
 │   └── e2e/             Playwright browser suite (`-m e2e`); `LiveServer` = real app + stub sidecar on a free port
 ├── client/generate.py
