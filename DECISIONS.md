@@ -3,6 +3,12 @@
 Append-only, newest first. Each entry records what was chosen, what else was
 on the table, and the evidence that settled it.
 
+## 2026-10-26 — Validate audio in the sidecar client, with a hand-written WAV parser
+- **Decision:** `HttpSidecar` validates the response body in memory with `inspect_wav` (a `struct` parser for PCM, IEEE float and EXTENSIBLE) before the atomic write, and `generate` returns `AudioInfo`. Duration, sample rate, channels and bytes go into four nullable columns, added to old databases with `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`.
+- **Alternatives considered:** validating in `JobRunner` after the file is written; stdlib `wave`; `soundfile`/`mutagen`; a migration framework; storing audio info inside the `timings` JSON; validating the file on disk after writing.
+- **Why:** The reproduced bug was a mocked 200 JSON body saved as `.wav` and shown green. Validating before the write means invalid output never exists on disk. `wave` rejects float and EXTENSIBLE WAV, and the other options add a dependency or a table for four columns. A real column is queryable, which Task 12 needs. The real pod output `song-client.wav` (149.188 s, 32 kHz stereo) validates.
+- **Consequences:** The whole body is held in memory (about 46 MB at 360 s, as before). A data chunk that declares fewer bytes than were received is accepted (trailing chunks are legal), so `bytes` can exceed the declared audio size. Revisit if the sidecar streams or returns other formats.
+
 ## 2026-10-26 — Scope rulings on the GitHub issue backlog
 - **Decision:** (1) #7's per-user access and quotas are not built. (2) #6's queue cap is built: whole-server limit, default 8, env-configurable. (3) #8 adds no new measurements.
 - **Alternatives considered:** per-user accounts for a public deployment; no admission limit; new pod runs for multi-prompt/seed benchmarks.

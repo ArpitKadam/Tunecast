@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from tunecast.app import ReadyState, create_app
 from tunecast.config import load_settings
 from tunecast.jobs import Estimator, JobRunner, JobStore
-from tunecast.sidecar import GenerateParams, SidecarError, StubSidecar
+from tunecast.sidecar import AudioInfo, GenerateParams, SidecarError, StubSidecar
 
 KEY = "test-key"
 AUTH = {"Authorization": f"Bearer {KEY}"}
@@ -21,7 +21,7 @@ class FailingSidecar:
     def ready(self) -> bool:
         return True
 
-    def generate(self, params: GenerateParams, out_path: Path) -> None:
+    def generate(self, params: GenerateParams, out_path: Path) -> AudioInfo:
         raise SidecarError("sidecar HTTP 500: CUDA out of memory")
 
     def describe(self) -> dict:
@@ -99,12 +99,25 @@ def test_submit_returns_202_and_shape(client):
     assert set(job) == {
         "id", "status", "queue_position", "created_at", "started_at", "finished_at",
         "params", "progress", "timings", "gpu", "audio_url", "error",
+        "audio_duration_s", "audio_sample_rate", "audio_channels", "audio_bytes",
     }
     assert job["status"] in ("queued", "running")
     assert job["params"] == {**BODY, "format": "wav"}
     assert job["audio_url"] is None
     assert job["error"] is None
+    assert job["audio_duration_s"] is None
     assert set(job["progress"]) == {"elapsed_s", "estimated_total_s", "fraction"}
+
+
+def test_succeeded_job_reports_real_audio_fields(client):
+    job_id = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    job = wait_for(client, job_id, "succeeded")
+    audio = client.get(job["audio_url"], headers=AUTH).content
+    assert job["audio_duration_s"] == 2.0
+    assert job["audio_sample_rate"] == 32000
+    assert job["audio_channels"] == 2
+    assert job["audio_bytes"] == len(audio)
+    assert client.get("/jobs", headers=AUTH).json()[0]["audio_duration_s"] == 2.0
 
 
 def test_duration_out_of_range_422(client):

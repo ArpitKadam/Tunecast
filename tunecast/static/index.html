@@ -290,7 +290,7 @@ Softly the world begins to breathe"></textarea>
     let state = job.status;
     if (job.status === "queued") state = job.queue_position > 0 ? `queued, ${job.queue_position} ahead` : "queued, next up";
     row.querySelector(".state").textContent = state;
-    row.querySelector(".len").textContent = fmt(p.duration_s);
+    row.querySelector(".len").textContent = job.audio_duration_s != null ? fmt(Math.round(job.audio_duration_s)) : "up to " + fmt(p.duration_s);
     row.querySelector(".seed").textContent = "seed " + p.seed;
     row.querySelector(".when").textContent = new Date(job.created_at).toLocaleTimeString();
     row.querySelector(".desc").textContent = p.description;

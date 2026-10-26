@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
+import struct
 import time
 import urllib.error
 import urllib.request
 import wave
 from array import array
 from dataclasses import dataclass
+from io import BytesIO
 from math import pi, sin
 from pathlib import Path
 from typing import Protocol
@@ -41,17 +44,72 @@ class GenerateParams:
         return self.duration_s * 10 + 120
 
 
+@dataclass(frozen=True)
+class AudioInfo:
+    duration_s: float
+    sample_rate: int
+    channels: int
+    bytes: int
+
+
 class Sidecar(Protocol):
     def ready(self) -> bool: ...
-    def generate(self, params: GenerateParams, out_path: Path) -> None: ...
+    def generate(self, params: GenerateParams, out_path: Path) -> AudioInfo: ...
     def describe(self) -> dict: ...
 
 
+_WAVE_PCM, _WAVE_FLOAT, _WAVE_EXTENSIBLE = 1, 3, 0xFFFE
+
+
+def inspect_wav(data: bytes) -> AudioInfo:
+    """Parse a RIFF/WAVE header (PCM, IEEE float, or EXTENSIBLE wrapping either); raise SidecarError unless it is whole, playable audio."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        head = data[:200]
+        hint = repr(head.decode("ascii")) if head.isascii() else f"{len(data)} binary bytes"
+        raise SidecarError(f"sidecar returned a body that is not a WAV file: {hint}")
+    fmt = None
+    pos = 12
+    while pos + 8 <= len(data):
+        chunk_id, size = struct.unpack_from("<4sI", data, pos)
+        body = pos + 8
+        if chunk_id == b"fmt ":
+            if size < 16 or body + size > len(data):
+                raise SidecarError("WAV fmt chunk is truncated")
+            tag, channels, rate, _, align, bits = struct.unpack_from("<HHIIHH", data, body)
+            if tag == _WAVE_EXTENSIBLE:
+                if size < 40:
+                    raise SidecarError("WAV extensible fmt chunk is truncated")
+                tag = struct.unpack_from("<H", data, body + 24)[0]
+            fmt = (tag, channels, rate, align, bits)
+        elif chunk_id == b"data":
+            if fmt is None:
+                raise SidecarError("WAV data chunk comes before fmt chunk")
+            tag, channels, rate, align, bits = fmt
+            if tag not in (_WAVE_PCM, _WAVE_FLOAT):
+                raise SidecarError(f"WAV format {tag} is not PCM or IEEE float")
+            if not (channels and rate and bits and bits % 8 == 0 and align == channels * bits // 8):
+                raise SidecarError(f"WAV fmt chunk is inconsistent (channels={channels}, rate={rate}, bits={bits}, block_align={align})")
+            if body + size > len(data):
+                raise SidecarError(f"WAV truncated: data chunk declares {size} bytes, {len(data) - body} received")
+            if size % align:
+                raise SidecarError(f"WAV data length {size} is not a whole number of {align}-byte frames")
+            if size == 0:
+                raise SidecarError("WAV contains no audio frames")
+            return AudioInfo(duration_s=round(size / align / rate, 3), sample_rate=rate, channels=channels, bytes=len(data))
+        pos = body + size + (size & 1)
+    raise SidecarError("WAV has no data chunk" if fmt else "WAV has no fmt chunk")
+
+
 def _write_atomic(out_path: Path, data: bytes) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".part")
-    tmp.write_bytes(data)
-    os.replace(tmp, out_path)
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(data)
+        os.replace(tmp, out_path)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        out_path.unlink(missing_ok=True)
+        raise SidecarError(f"could not write audio file: {e}") from None
 
 
 class HttpSidecar:
@@ -73,7 +131,7 @@ class HttpSidecar:
                 return False                  # nothing listening: no point trying another path
         return False
 
-    def generate(self, params: GenerateParams, out_path: Path) -> None:
+    def generate(self, params: GenerateParams, out_path: Path) -> AudioInfo:
         payload = {
             "model": self.model_id,
             "input": params.lyrics,
@@ -95,11 +153,17 @@ class HttpSidecar:
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:MAX_ERROR_CHARS]
             raise SidecarError(f"sidecar HTTP {e.code}: {detail}") from None
-        except (urllib.error.URLError, OSError, ValueError) as e:
+        except http.client.IncompleteRead as e:  # read() enforces Content-Length: short body raises here
+            raise SidecarError(f"sidecar response truncated: got {len(e.partial)} of {len(e.partial) + e.expected} bytes") from None
+        except (TimeoutError, urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as e:
+            if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
+                raise SidecarError(f"sidecar timed out after {params.timeout_s}s") from None
             raise SidecarError(f"sidecar unreachable: {e}") from None
         if not body:
             raise SidecarError("sidecar returned an empty body")
+        info = inspect_wav(body)
         _write_atomic(out_path, body)
+        return info
 
     def describe(self) -> dict:
         return {"kind": "sglang-omni", "base_url": self.base_url, "model": self.model_id}
@@ -116,7 +180,7 @@ class StubSidecar:
     def ready(self) -> bool:
         return True
 
-    def generate(self, params: GenerateParams, out_path: Path) -> None:
+    def generate(self, params: GenerateParams, out_path: Path) -> AudioInfo:
         delay = min(params.duration_s * 0.05, 3.0) if self.delay_s is None else self.delay_s
         if delay > 0:
             time.sleep(delay)
@@ -126,14 +190,15 @@ class StubSidecar:
             sample = int(8000 * sin(2 * pi * i / cycle))
             block.extend((sample, sample))
         repeats = params.duration_s * SAMPLE_RATE // cycle
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out_path.with_suffix(out_path.suffix + ".part")
-        with wave.open(str(tmp), "wb") as w:
+        buf = BytesIO()
+        with wave.open(buf, "wb") as w:
             w.setnchannels(CHANNELS)
             w.setsampwidth(2)
             w.setframerate(SAMPLE_RATE)
             w.writeframes(block.tobytes() * repeats)
-        os.replace(tmp, out_path)
+        info = inspect_wav(buf.getvalue())
+        _write_atomic(out_path, buf.getvalue())
+        return info
 
     def describe(self) -> dict:
         return {"kind": "stub", "tone_hz": self.TONE_HZ}

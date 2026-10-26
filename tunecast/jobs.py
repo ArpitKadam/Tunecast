@@ -36,11 +36,16 @@ CREATE TABLE IF NOT EXISTS jobs (
     params TEXT NOT NULL,
     timings TEXT NOT NULL DEFAULT '{}',
     gpu TEXT NOT NULL DEFAULT '[]',
-    error TEXT
+    error TEXT,
+    audio_duration_s REAL,
+    audio_sample_rate INTEGER,
+    audio_channels INTEGER,
+    audio_bytes INTEGER
 )
 """
+_AUDIO_COLUMNS = {"audio_duration_s": "REAL", "audio_sample_rate": "INTEGER", "audio_channels": "INTEGER", "audio_bytes": "INTEGER"}
 _JSON_FIELDS = {"params", "timings", "gpu"}
-_UPDATABLE = {"status", "started_at", "finished_at", "timings", "gpu", "error"}
+_UPDATABLE = {"status", "started_at", "finished_at", "timings", "gpu", "error", *_AUDIO_COLUMNS}
 
 
 def utcnow() -> str:
@@ -66,6 +71,10 @@ class Job:
     timings: dict = field(default_factory=dict)
     gpu: list = field(default_factory=list)
     error: str | None = None
+    audio_duration_s: float | None = None
+    audio_sample_rate: int | None = None
+    audio_channels: int | None = None
+    audio_bytes: int | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -79,6 +88,7 @@ class Job:
             timings=json.loads(row["timings"]),
             gpu=json.loads(row["gpu"]),
             error=row["error"],
+            **{col: row[col] for col in _AUDIO_COLUMNS},
         )
 
 
@@ -91,6 +101,10 @@ class JobStore:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(_SCHEMA)
+        have = {r["name"] for r in self._db.execute("PRAGMA table_info(jobs)")}
+        for col, sql_type in _AUDIO_COLUMNS.items():
+            if col not in have:     # DB created before audio validation
+                self._db.execute(f"ALTER TABLE jobs ADD COLUMN {col} {sql_type}")
         self._db.commit()
 
     def audio_path(self, job_id: str) -> Path:
@@ -243,8 +257,9 @@ class JobRunner:
         out_path = self.store.audio_path(job_id)
         clock = time.monotonic()
         try:
-            self.sidecar.generate(params, out_path)
+            audio = self.sidecar.generate(params, out_path)
         except Exception as e:
+            out_path.unlink(missing_ok=True)
             inference_s = time.monotonic() - clock
             timings = {"queue_wait_s": round(queue_wait_s, 3), "inference_s": round(inference_s, 3)}
             self.store.update(job_id, status="failed", finished_at=utcnow(), error=str(e)[:2000], timings=timings)
@@ -259,11 +274,16 @@ class JobRunner:
             "total_s": round(queue_wait_s + inference_s, 3),
         }
         self.estimator.observe(params.duration_s, inference_s)
-        if self.store.update(job_id, status="succeeded", finished_at=utcnow(), timings=timings, gpu=gpu) == 0:
+        done = self.store.update(
+            job_id, status="succeeded", finished_at=utcnow(), timings=timings, gpu=gpu,
+            audio_duration_s=audio.duration_s, audio_sample_rate=audio.sample_rate,
+            audio_channels=audio.channels, audio_bytes=audio.bytes,
+        )
+        if done == 0:
             out_path.unlink(missing_ok=True)   # row was deleted while we were generating
             log_event(self.logger, "job_discarded", job_id=job_id, reason="deleted during run")
             return
-        log_event(self.logger, "job_succeeded", job_id=job_id, bytes=out_path.stat().st_size, gpu=gpu, **timings)
+        log_event(self.logger, "job_succeeded", job_id=job_id, bytes=audio.bytes, audio_duration_s=audio.duration_s, gpu=gpu, **timings)
 
         pruned = self.store.prune(self.keep_last)
         if pruned:
@@ -305,5 +325,9 @@ def job_to_dict(job: Job, store: JobStore, estimator: Estimator) -> dict:
         "timings": job.timings,
         "gpu": job.gpu,
         "audio_url": f"/jobs/{job.id}/audio" if job.status == "succeeded" else None,
+        "audio_duration_s": job.audio_duration_s,
+        "audio_sample_rate": job.audio_sample_rate,
+        "audio_channels": job.audio_channels,
+        "audio_bytes": job.audio_bytes,
         "error": job.error,
     }

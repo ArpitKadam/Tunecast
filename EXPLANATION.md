@@ -3,6 +3,13 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-10-26 — Task 9: validate generated audio, store real duration
+
+- **What changed:** A job is green only if the sidecar returned a complete, playable WAV. The API returns the real duration, sample rate, channel count and byte size, and the UI shows the real length instead of the requested maximum (older rows without it show "up to M:SS").
+- **How it works:** `HttpSidecar.generate` reads the body (a short body raises `IncompleteRead`, reported as truncated) and passes it to `inspect_wav`, which walks the RIFF chunks and requires a PCM or float fmt chunk with consistent fields plus a data chunk of at least one whole frame that fits in the bytes received. Only then is the file written via `.part` and `os.replace`. Any failure raises `SidecarError`, the runner marks the job `failed` with the message, and no output file remains. On success the four `audio_*` columns are saved; older databases get them added at startup.
+- **How it was verified:** `uv run pytest -q tests --ignore=tests/e2e` gives 115 passed (87 before). `tests/test_audio_validation.py` covers JSON 200, empty body, truncated transfer, timeout, disk-write failure, valid PCM16/float32/EXTENSIBLE, no leftover file, API fields and old-schema migration. The real pod file `song-client.wav` validates as 149.188 s, 32 kHz, stereo. Reviewer verdict GREEN. The `index.html` one-line change was not driven in a browser.
+- **Limitations / follow-ups:** A data chunk smaller than the body is accepted. `timeout_s` is per socket operation, not a total deadline (unchanged). A valid WAV is left on disk if the final DB update raises. Estimator still uses the requested duration (Task 12).
+
 ## 2026-10-26 — Issue backlog written into TASK.md
 
 - **What changed:** The eight open GitHub issues (#1–#8) are now Tasks 8–15

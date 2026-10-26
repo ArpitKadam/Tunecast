@@ -34,8 +34,8 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | Settings | `tunecast/config.py` | Parse and validate env into a frozen `Settings`; hard-fail on missing secrets |
 | Logging | `tunecast/log.py` | JSON formatter, stdout + file sinks, secret redaction, `log_event` helper |
 | Weights | `tunecast/weights.py`, `tunecast/weights_manifest.json` | Manifest verify, idempotent `snapshot_download`, completion marker |
-| Sidecar | `tunecast/sidecar.py` | `HttpSidecar` (sgl-omni client) and `StubSidecar` (sine WAV) behind one interface |
-| Jobs | `tunecast/jobs.py` | SQLite `JobStore`, `JobRunner` worker threads, queue position, progress estimate, prune |
+| Sidecar | `tunecast/sidecar.py` | `HttpSidecar` (sgl-omni client) and `StubSidecar` (sine WAV) behind one interface; `inspect_wav` validates every response and `generate` returns `AudioInfo` |
+| Jobs | `tunecast/jobs.py` | SQLite `JobStore` (nullable `audio_duration_s`, `audio_sample_rate`, `audio_channels`, `audio_bytes`, added in place to older DBs), `JobRunner` worker threads, queue position, progress estimate, prune |
 | GPU info | `tunecast/gpu.py` | `nvidia-smi` query, empty list when absent |
 | API | `tunecast/app.py` | FastAPI factory, bearer auth, routes, static UI |
 | Tunnel | `tunecast/tunnel.py` | ngrok subprocess, bind check via local API, restart loop |
@@ -49,7 +49,7 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 
 1. `POST /jobs` → auth → pydantic validation → `JobStore.create` (status `queued`) → `JobRunner.submit(id)` → 202 with job JSON.
 2. Worker thread pops the id, `JobStore.update(status="running", started_at=…)`, builds the sidecar payload (`input`, `instructions`, `seed`, `max_new_tokens = duration_s × 25`, `response_format`, `stream=false`), POSTs to `http://127.0.0.1:8000/v1/audio/speech`.
-3. Response bytes written to `outputs/<id>.wav`; `timings`, `gpu` captured; status `succeeded`. Any failure → status `failed`, `error` filled.
+3. The body must be non-empty and complete (Content-Length enforced); `inspect_wav` checks the RIFF/WAVE header, fmt (PCM, float or EXTENSIBLE) and a data chunk of whole frames that fits in the bytes received. Only then is it written atomically (`.part`, `os.replace`) to `outputs/<id>.wav`. Duration, sample rate, channels and size are stored; `timings`, `gpu` captured; status `succeeded`. Any failure (bad body, truncation, timeout, disk error) → no file left, status `failed`, `error` filled.
 4. `GET /jobs/{id}` returns the row plus computed `queue_position` (jobs ahead: running + queued earlier) and `progress` (estimate, capped 0.95 while running).
 5. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`.
 6. Prune deletes the oldest succeeded jobs beyond `TUNECAST_KEEP_LAST`.
@@ -69,7 +69,7 @@ def ensure_weights(settings: Settings) -> float            # seconds spent downl
 class GenerateParams: lyrics: str; description: str; duration_s: int; seed: int; format: str
 class Sidecar(Protocol):
     def ready(self) -> bool: ...
-    def generate(self, params: GenerateParams, out_path: Path) -> None: ...   # raises SidecarError
+    def generate(self, params: GenerateParams, out_path: Path) -> AudioInfo: ...   # raises SidecarError
     def describe(self) -> dict: ...
 
 # jobs.py
