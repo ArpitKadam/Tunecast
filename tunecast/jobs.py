@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import queue
@@ -40,10 +41,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     audio_duration_s REAL,
     audio_sample_rate INTEGER,
     audio_channels INTEGER,
-    audio_bytes INTEGER
+    audio_bytes INTEGER,
+    request_id TEXT,
+    request_hash TEXT
 )
 """
 _AUDIO_COLUMNS = {"audio_duration_s": "REAL", "audio_sample_rate": "INTEGER", "audio_channels": "INTEGER", "audio_bytes": "INTEGER"}
+_ADDED_COLUMNS = {**_AUDIO_COLUMNS, "request_id": "TEXT", "request_hash": "TEXT"}
+# NULLs never collide, so submissions without a request ID keep working
+_REQUEST_ID_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS jobs_request_id ON jobs (request_id)"
 _JSON_FIELDS = {"params", "timings", "gpu"}
 _UPDATABLE = {"status", "started_at", "finished_at", "timings", "gpu", "error", *_AUDIO_COLUMNS}
 
@@ -54,6 +60,19 @@ def utcnow() -> str:
 
 def parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def fingerprint(params: dict) -> str:
+    """Stable hash of a validated request body, so a reused request ID with different content is detectable."""
+    return hashlib.sha256(json.dumps(params, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+class DuplicateRequest(Exception):
+    """The request ID is already taken; `job` is the job that took it."""
+
+    def __init__(self, job: "Job"):
+        super().__init__(job.id)
+        self.job = job
 
 
 def new_job_id() -> str:
@@ -75,6 +94,8 @@ class Job:
     audio_sample_rate: int | None = None
     audio_channels: int | None = None
     audio_bytes: int | None = None
+    request_id: str | None = None
+    request_hash: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Job":
@@ -88,7 +109,7 @@ class Job:
             timings=json.loads(row["timings"]),
             gpu=json.loads(row["gpu"]),
             error=row["error"],
-            **{col: row[col] for col in _AUDIO_COLUMNS},
+            **{col: row[col] for col in _ADDED_COLUMNS},
         )
 
 
@@ -102,23 +123,38 @@ class JobStore:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(_SCHEMA)
         have = {r["name"] for r in self._db.execute("PRAGMA table_info(jobs)")}
-        for col, sql_type in _AUDIO_COLUMNS.items():
-            if col not in have:     # DB created before audio validation
+        for col, sql_type in _ADDED_COLUMNS.items():
+            if col not in have:     # DB created before audio validation or request IDs
                 self._db.execute(f"ALTER TABLE jobs ADD COLUMN {col} {sql_type}")
+        self._db.execute(_REQUEST_ID_INDEX)
         self._db.commit()
 
     def audio_path(self, job_id: str) -> Path:
         return self.outputs_dir / f"{job_id}.wav"
 
-    def create(self, params: dict) -> Job:
-        job = Job(id=new_job_id(), status="queued", created_at=utcnow(), params=dict(params))
+    def create(self, params: dict, request_id: str | None = None, request_hash: str | None = None) -> Job:
+        """Raises DuplicateRequest when request_id already belongs to a job; the UNIQUE index decides races."""
+        job = Job(id=new_job_id(), status="queued", created_at=utcnow(), params=dict(params),
+                  request_id=request_id, request_hash=request_hash)
         with self._lock:
-            self._db.execute(
-                "INSERT INTO jobs (id, status, created_at, params) VALUES (?, ?, ?, ?)",
-                (job.id, job.status, job.created_at, json.dumps(job.params)),
-            )
-            self._db.commit()
+            try:
+                self._db.execute(
+                    "INSERT INTO jobs (id, status, created_at, params, request_id, request_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                    (job.id, job.status, job.created_at, json.dumps(job.params), request_id, request_hash),
+                )
+                self._db.commit()
+            except sqlite3.IntegrityError:
+                self._db.rollback()
+                row = self._db.execute("SELECT * FROM jobs WHERE request_id = ?", (request_id,)).fetchone() if request_id else None
+                if row is None:
+                    raise
+                raise DuplicateRequest(Job.from_row(row)) from None
         return job
+
+    def get_by_request_id(self, request_id: str) -> Job | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM jobs WHERE request_id = ?", (request_id,)).fetchone()
+        return Job.from_row(row) if row else None
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -330,4 +366,5 @@ def job_to_dict(job: Job, store: JobStore, estimator: Estimator) -> dict:
         "audio_channels": job.audio_channels,
         "audio_bytes": job.audio_bytes,
         "error": job.error,
+        "request_id": job.request_id,
     }

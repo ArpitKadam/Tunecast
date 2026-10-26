@@ -230,18 +230,47 @@ Softly the world begins to breathe"></textarea>
   const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
   $("duration").addEventListener("input", (e) => { $("durlabel").textContent = fmt(+e.target.value); });
 
+  let pending = null;     // {id, text} of a submission whose outcome is not known yet; a retry of the same take reuses its ID
+  const newRequestId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // The job for this request ID, null when the server confirms there is none, undefined when it could not be asked.
+  async function findByRequestId(id) {
+    for (let i = 0; i < 5; i++) {
+      if (i) await sleep(500 * 2 ** (i - 1));
+      try {
+        const r = await api("/jobs?request_id=" + id);
+        if (r.ok) return (await r.json())[0] || null;
+      } catch (err) { if (err.message === "unauthorized") return; }
+    }
+  }
+
   $("takeform").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     const body = { lyrics: f.get("lyrics"), description: f.get("description"), duration_s: +f.get("duration_s") };
     if (f.get("seed") !== "") body.seed = +f.get("seed");
-    $("submit").disabled = true; $("formnote").textContent = "";
+    const text = JSON.stringify(body);
+    if (!pending || pending.text !== text) pending = { id: newRequestId(), text };
+    const note = $("formnote");
+    $("submit").disabled = true; note.textContent = ""; note.classList.remove("error");
     try {
-      const r = await api("/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (r.status === 202) { $("formnote").textContent = "Queued."; await poll(); }
-      else { const d = await r.json().catch(() => ({})); $("formnote").innerHTML = ""; $("formnote").textContent = "Not started: " + (typeof d.detail === "string" ? d.detail : d.detail ? JSON.stringify(d.detail) : r.status); $("formnote").classList.add("error"); }
-    } catch (err) { $("formnote").textContent = "Not started: " + err.message; }
-    finally { $("submit").disabled = false; }
+      const r = await api("/jobs", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": pending.id }, body: text });
+      if (r.status >= 500) throw new Error("server error");
+      pending = null;
+      if (r.ok) { note.textContent = r.status === 202 ? "Queued." : "Already submitted."; await poll(); }
+      else { const d = await r.json().catch(() => ({})); note.textContent = "Not started: " + (typeof d.detail === "string" ? d.detail : d.detail ? JSON.stringify(d.detail) : r.status); note.classList.add("error"); }
+    } catch (err) {
+      if (err.message === "unauthorized") { pending = null; note.textContent = "Not started: unauthorized"; return; }
+      note.textContent = "Submission status unknown, checking…";
+      const job = await findByRequestId(pending.id);
+      if (job) { pending = null; note.textContent = "Queued."; await poll(); }
+      else {
+        // pending stays: retrying the same take resends the same ID, so it cannot be queued twice
+        note.textContent = job === null ? "Not submitted. Your draft is kept, try again." : "Submission status unknown. Check the reel, then try again; resending is safe.";
+        note.classList.add("error");
+      }
+    } finally { $("submit").disabled = false; }
   });
 
   async function poll() {

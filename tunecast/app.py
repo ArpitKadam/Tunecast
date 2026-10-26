@@ -14,13 +14,14 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .gpu import query_gpus
-from .jobs import JobRunner, JobStore, job_to_dict
+from .jobs import DuplicateRequest, JobRunner, JobStore, fingerprint, job_to_dict
 from .sidecar import Sidecar
 
 MAX_DURATION_S = 360
 MAX_LYRICS_CHARS = 20_000
 MAX_DESCRIPTION_CHARS = 10_000
 MAX_SEED = 2**31 - 1
+REQUEST_ID_PATTERN = r"^[A-Za-z0-9_-]{8,128}$"
 
 
 @dataclass
@@ -82,16 +83,26 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
         }
 
     @app.post("/jobs", dependencies=auth, status_code=202)
-    def submit(req: JobRequest):
+    def submit(req: JobRequest, idempotency_key: str | None = Header(default=None, pattern=REQUEST_ID_PATTERN)):
         params = req.model_dump()
+        digest = fingerprint(params)    # before the seed is drawn, so a retry without a seed still matches
         if params["seed"] is None:
             params["seed"] = secrets.randbelow(MAX_SEED + 1)
-        job = store.create(params)
+        try:
+            job = store.create(params, idempotency_key, digest)
+        except DuplicateRequest as dup:
+            if dup.job.request_hash != digest:
+                raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different request") from None
+            # replay: 200, not 202, because nothing new was accepted
+            return JSONResponse(status_code=200, content=job_to_dict(dup.job, store, runner.estimator))
         runner.submit(job.id)
         return JSONResponse(status_code=202, content=job_to_dict(job, store, runner.estimator))
 
     @app.get("/jobs", dependencies=auth)
-    def list_jobs(limit: int = Query(default=50, ge=1, le=200)):
+    def list_jobs(limit: int = Query(default=50, ge=1, le=200), request_id: str | None = Query(default=None, pattern=REQUEST_ID_PATTERN)):
+        if request_id is not None:
+            job = store.get_by_request_id(request_id)
+            return [job_to_dict(job, store, runner.estimator)] if job else []
         return [job_to_dict(j, store, runner.estimator) for j in store.list(limit)]
 
     @app.get("/jobs/{job_id}", dependencies=auth)

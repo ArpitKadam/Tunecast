@@ -17,14 +17,18 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 
 RETRIES = 5          # a free ngrok tunnel drops a connection now and then
 RETRY_WAIT_S = 3.0
 
 
-def request(url: str, key: str, method: str = "GET", body: dict | None = None, timeout: float = 60) -> bytes:
+def request(url: str, key: str, method: str = "GET", body: dict | None = None, timeout: float = 60,
+            idempotency_key: str | None = None) -> bytes:
     headers = {"Authorization": f"Bearer {key}", "ngrok-skip-browser-warning": "1"}
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     data = None
     if body is not None:
         data = json.dumps(body).encode("utf-8")
@@ -35,12 +39,13 @@ def request(url: str, key: str, method: str = "GET", body: dict | None = None, t
 
 
 def request_with_retries(url: str, key: str, method: str = "GET", body: dict | None = None,
-                         timeout: float = 60, attempts: int = RETRIES) -> bytes:
+                         timeout: float = 60, attempts: int = RETRIES, idempotency_key: str | None = None) -> bytes:
     """Retry transport failures and 5xx. A dropped tunnel must not abandon a job that is still running
-    on the server. 4xx is not retried: a bad key or a bad request will not fix itself."""
+    on the server. 4xx is not retried: a bad key or a bad request will not fix itself.
+    A POST is only safe to retry when it carries an idempotency_key: the server then replays the first job."""
     for attempt in range(1, attempts + 1):
         try:
-            return request(url, key, method, body, timeout)
+            return request(url, key, method, body, timeout, idempotency_key)
         except urllib.error.HTTPError as e:
             if e.code < 500 or attempt == attempts:
                 raise
@@ -77,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         body["seed"] = args.seed
 
     try:
-        job = json.loads(request(f"{base}/jobs", args.key, "POST", body, timeout=30))
+        job = json.loads(request_with_retries(f"{base}/jobs", args.key, "POST", body, timeout=30, idempotency_key=uuid.uuid4().hex))
     except urllib.error.HTTPError as e:
         print(f"submit failed: HTTP {e.code} {e.read().decode('utf-8', 'replace')[:300]}", file=sys.stderr)
         return 2

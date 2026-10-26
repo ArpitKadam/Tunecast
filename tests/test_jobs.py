@@ -1,11 +1,13 @@
+import json
 import logging
+import sqlite3
 import wave
 from pathlib import Path
 
 import pytest
 
 from tunecast.gpu import parse_nvidia_smi, query_gpus
-from tunecast.jobs import Estimator, Job, JobStore, new_job_id
+from tunecast.jobs import DuplicateRequest, Estimator, Job, JobStore, fingerprint, new_job_id
 from tunecast.sidecar import GenerateParams, SidecarError, StubSidecar
 
 LOG = logging.getLogger("test")
@@ -181,3 +183,51 @@ def test_query_gpus_returns_list_of_dicts():
     assert isinstance(gpus, list)
     for g in gpus:
         assert {"index", "name", "used_mb", "total_mb"} <= set(g)
+
+OLD_SCHEMA = """
+CREATE TABLE jobs (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    params TEXT NOT NULL,
+    timings TEXT NOT NULL DEFAULT '{}',
+    gpu TEXT NOT NULL DEFAULT '[]',
+    error TEXT
+)
+"""
+
+
+def test_store_migrates_db_from_before_request_ids(tmp_path):
+    db = tmp_path / "jobs.db"
+    old = sqlite3.connect(db)
+    old.execute(OLD_SCHEMA)
+    old.execute("INSERT INTO jobs (id, status, created_at, params) VALUES ('old-1', 'succeeded', '2026-01-01T00:00:00.000Z', ?)", (json.dumps(PARAMS),))
+    old.commit()
+    old.close()
+
+    store = JobStore(db, tmp_path / "outputs")
+    assert store.get("old-1").request_id is None
+    a = store.create(PARAMS)
+    b = store.create(PARAMS)
+    assert a.id != b.id
+    keyed = store.create(PARAMS, "req-0123456789", "h")
+    with pytest.raises(DuplicateRequest) as dup:
+        store.create(PARAMS, "req-0123456789", "h")
+    assert dup.value.job.id == keyed.id
+    JobStore(db, tmp_path / "outputs")      # reopening an already migrated DB is a no-op
+
+
+def test_create_with_request_id_roundtrip_and_lookup(store):
+    job = store.create(PARAMS, "req-0123456789", fingerprint(PARAMS))
+    assert store.get_by_request_id("req-0123456789") == job
+    assert store.get(job.id) == job
+    assert store.get_by_request_id("req-other-key") is None
+
+
+def test_fingerprint_ignores_key_order_and_sees_changes():
+    assert fingerprint({"a": 1, "b": 2}) == fingerprint({"b": 2, "a": 1})
+    assert fingerprint(PARAMS) != fingerprint({**PARAMS, "seed": 8})
+

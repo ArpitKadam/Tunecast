@@ -3,6 +3,13 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-10-26 — Task 10: idempotent submissions
+
+- **What changed:** A network blip can no longer queue the same song twice. The page and `client/generate.py` send an `Idempotency-Key` with each submission and reuse it on retry. After a lost response the page says "Submission status unknown, checking…" and looks the job up by key.
+- **How it works:** The server stores the key and a hash of the validated body on the job row under a UNIQUE index. The insert either succeeds (202, enqueued) or hits the key: same body gives 200 with the existing job, a changed body gives 409; nothing is enqueued on the replay path. `GET /jobs?request_id=` returns the matching job or an empty list. If the POST fails, or comes back 5xx, the page polls that lookup with backoff and shows the job, "Not submitted" (draft kept), or "status unknown, resending is safe". The key is kept until the server answers definitively, so clicking again is safe. The CLI uses one UUID per run and retries submit like polling.
+- **How it was verified:** `uv run pytest -q`: 133 passed, 14 deselected. `uv run pytest -m e2e -q`: 12 passed, 2 xfailed (the Task 14 ones). Tests cover same key/body replay, 409, no-key behaviour, 8 concurrent identical submits giving one job and one sidecar call, malformed keys, lookup and its auth, old-schema migration, CLI retries reusing the key, and e2e lost-response, never-reached and 504-after-accept cases. The 504 test fails with the 5xx handling removed and passes with it. Reviewer verdict GREEN; its 5xx finding was fixed before commit.
+- **Limitations / follow-ups:** A deleted or pruned job frees its key. A failed job replays as failed. Old rows have no key. A POST still in flight when the lookup says "none" is a small theoretical gap; keeping the key on retry covers it. After all submit retries fail with 5xx, the CLI message does not say the job may exist (nit, left).
+
 ## 2026-10-26 — Task 8: PR CI gate and browser regression tests
 
 - **What changed:** Pull requests now run the unit tests and a Playwright browser suite. The Docker image can only be built after those pass, and pull requests never build or push it.

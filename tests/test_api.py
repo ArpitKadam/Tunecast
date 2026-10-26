@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 import wave
 from io import BytesIO
@@ -99,7 +100,7 @@ def test_submit_returns_202_and_shape(client):
     assert set(job) == {
         "id", "status", "queue_position", "created_at", "started_at", "finished_at",
         "params", "progress", "timings", "gpu", "audio_url", "error",
-        "audio_duration_s", "audio_sample_rate", "audio_channels", "audio_bytes",
+        "audio_duration_s", "audio_sample_rate", "audio_channels", "audio_bytes", "request_id",
     }
     assert job["status"] in ("queued", "running")
     assert job["params"] == {**BODY, "format": "wav"}
@@ -220,3 +221,117 @@ def test_root_serves_ui_with_attribution_and_warning(client):
     assert "deleted when this pod terminates" in body
     assert "ngrok-skip-browser-warning" in body
     assert "<script src=" not in body and "<link" not in body   # no external assets over the tunnel
+
+
+class CountingSidecar(StubSidecar):
+    def __init__(self, delay_s=0.0):
+        super().__init__(delay_s=delay_s)
+        self.calls = 0
+
+    def generate(self, params, out_path):
+        self.calls += 1
+        return super().generate(params, out_path)
+
+
+def keyed(key="req-0123456789"):
+    return {**AUTH, "Idempotency-Key": key}
+
+
+def test_same_key_same_body_returns_same_job_and_runs_once(tmp_path):
+    sidecar = CountingSidecar(delay_s=0.1)
+    client, _, store = build(tmp_path, sidecar=sidecar)
+    first = client.post("/jobs", json=BODY, headers=keyed())
+    again = client.post("/jobs", json=BODY, headers=keyed())
+    assert first.status_code == 202
+    assert again.status_code == 200
+    assert again.json()["id"] == first.json()["id"]
+    assert again.json()["request_id"] == "req-0123456789"
+    wait_for(client, first.json()["id"], "succeeded")
+    assert len(store.list()) == 1
+    assert sidecar.calls == 1
+
+
+def test_same_key_without_seed_replays_the_same_job_and_seed(client):
+    body = {k: v for k, v in BODY.items() if k != "seed"}
+    first = client.post("/jobs", json=body, headers=keyed()).json()
+    again = client.post("/jobs", json=body, headers=keyed())
+    assert again.status_code == 200
+    assert again.json()["id"] == first["id"]
+    assert again.json()["params"]["seed"] == first["params"]["seed"]
+
+
+def test_same_key_changed_body_is_409_and_creates_nothing(client):
+    first = client.post("/jobs", json=BODY, headers=keyed())
+    changed = client.post("/jobs", json={**BODY, "duration_s": 3}, headers=keyed())
+    assert changed.status_code == 409
+    assert "Idempotency-Key" in changed.json()["detail"]
+    assert len(client.get("/jobs", headers=AUTH).json()) == 1
+    assert client.get("/jobs", headers=AUTH).json()[0]["id"] == first.json()["id"]
+
+
+def test_without_key_every_submit_is_a_new_job(client):
+    a = client.post("/jobs", json=BODY, headers=AUTH)
+    b = client.post("/jobs", json=BODY, headers=AUTH)
+    assert a.status_code == b.status_code == 202
+    assert a.json()["id"] != b.json()["id"]
+    assert a.json()["request_id"] is None
+
+
+def test_different_keys_are_different_jobs(client):
+    a = client.post("/jobs", json=BODY, headers=keyed("req-aaaaaaaaaa"))
+    b = client.post("/jobs", json=BODY, headers=keyed("req-bbbbbbbbbb"))
+    assert a.json()["id"] != b.json()["id"]
+
+
+@pytest.mark.parametrize("bad", ["short", "has space in it", "x" * 129, "semi;colon-key"])
+def test_malformed_key_is_rejected(client, bad):
+    assert client.post("/jobs", json=BODY, headers=keyed(bad)).status_code == 422
+    assert client.get("/jobs", params={"request_id": bad}, headers=AUTH).status_code == 422
+    assert client.get("/jobs", headers=AUTH).json() == []
+
+
+def test_concurrent_duplicate_submits_make_one_job(tmp_path):
+    sidecar = CountingSidecar(delay_s=0.1)
+    client, _, store = build(tmp_path, sidecar=sidecar)
+    barrier = threading.Barrier(8)
+    codes = []
+
+    def post():
+        barrier.wait()
+        codes.append(client.post("/jobs", json=BODY, headers=keyed()).status_code)
+
+    threads = [threading.Thread(target=post) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(codes) == [200] * 7 + [202]
+    jobs = store.list()
+    assert len(jobs) == 1
+    wait_for(client, jobs[0].id, "succeeded")
+    assert sidecar.calls == 1
+
+
+def test_lookup_by_request_id(client):
+    job = client.post("/jobs", json=BODY, headers=keyed()).json()
+    client.post("/jobs", json=BODY, headers=AUTH)
+    found = client.get("/jobs", params={"request_id": "req-0123456789"}, headers=AUTH)
+    assert found.status_code == 200
+    assert [j["id"] for j in found.json()] == [job["id"]]
+    missing = client.get("/jobs", params={"request_id": "req-never-used"}, headers=AUTH)
+    assert missing.status_code == 200
+    assert missing.json() == []
+
+
+def test_lookup_by_request_id_needs_auth(client):
+    assert client.get("/jobs", params={"request_id": "req-0123456789"}).status_code == 401
+    assert client.post("/jobs", json=BODY, headers={"Idempotency-Key": "req-0123456789"}).status_code == 401
+
+
+def test_deleted_job_frees_its_key(client):
+    first = client.post("/jobs", json=BODY, headers=keyed()).json()
+    wait_for(client, first["id"], "succeeded")
+    assert client.delete(f"/jobs/{first['id']}", headers=AUTH).status_code == 204
+    again = client.post("/jobs", json=BODY, headers=keyed())
+    assert again.status_code == 202
+    assert again.json()["id"] != first["id"]

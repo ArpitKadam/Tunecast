@@ -1,3 +1,4 @@
+import json
 import socket
 import sys
 import threading
@@ -68,7 +69,8 @@ def test_client_wrong_key_exits_2(server, tmp_path):
     assert code == 2
 
 
-def test_client_unreachable_exits_2(tmp_path):
+def test_client_unreachable_exits_2(tmp_path, monkeypatch):
+    monkeypatch.setattr(generate, "RETRY_WAIT_S", 0)
     lyrics = tmp_path / "lyrics.txt"
     lyrics.write_text("la", encoding="utf-8")
     code = generate.main(["--url", "http://127.0.0.1:9", "--key", "k", "--lyrics-file", str(lyrics), "--description", "x", "--duration", "1"])
@@ -80,12 +82,13 @@ def test_client_survives_transient_drops_while_polling(server, tmp_path, monkeyp
     real = generate.request
     calls = {"n": 0}
 
-    def flaky(url, key, method="GET", body=None, timeout=60):
+    def flaky(url, key, method="GET", body=None, timeout=60, idempotency_key=None):
         calls["n"] += 1
         if calls["n"] in (2, 3, 5):        # two consecutive drops, then another later
             raise OSError("Remote end closed connection without response")
-        return real(url, key, method, body, timeout)
+        return real(url, key, method, body, timeout, idempotency_key)
 
+    monkeypatch.setattr(generate, "RETRY_WAIT_S", 0)
     monkeypatch.setattr(generate, "request", flaky)
     lyrics = tmp_path / "lyrics.txt"
     lyrics.write_text("[Verse]\nla la", encoding="utf-8")
@@ -101,10 +104,65 @@ def test_client_survives_transient_drops_while_polling(server, tmp_path, monkeyp
     assert "retrying" in capsys.readouterr().err
 
 
-def test_client_gives_up_after_repeated_drops(server, tmp_path, monkeypatch):
-    monkeypatch.setattr(generate, "request", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+def test_client_gives_up_after_repeated_drops(server, tmp_path, monkeypatch, capsys):
+    real = generate.request
+
+    def only_submit_works(url, key, method="GET", body=None, timeout=60, idempotency_key=None):
+        if method == "POST":
+            return real(url, key, method, body, timeout, idempotency_key)
+        raise OSError("boom")
+
+    monkeypatch.setattr(generate, "RETRY_WAIT_S", 0)
+    monkeypatch.setattr(generate, "request", only_submit_works)
     lyrics = tmp_path / "lyrics.txt"
     lyrics.write_text("la", encoding="utf-8")
     code = generate.main(["--url", server, "--key", "k", "--lyrics-file", str(lyrics),
                           "--description", "x", "--duration", "1", "--poll", "0.05"])
     assert code == 2
+    assert "status checks kept failing" in capsys.readouterr().err
+
+
+def test_client_retries_a_lost_submit_response_with_the_same_key(server, tmp_path, monkeypatch):
+    """The server accepts the POST but the response never arrives; the retry must not queue a second song."""
+    real = generate.request
+    posts = []
+
+    def lose_first_response(url, key, method="GET", body=None, timeout=60, idempotency_key=None):
+        out = real(url, key, method, body, timeout, idempotency_key)
+        if method == "POST":
+            posts.append(idempotency_key)
+            if len(posts) == 1:
+                raise OSError("Remote end closed connection without response")
+        return out
+
+    monkeypatch.setattr(generate, "RETRY_WAIT_S", 0)
+    monkeypatch.setattr(generate, "request", lose_first_response)
+    lyrics = tmp_path / "lyrics.txt"
+    lyrics.write_text("[Verse]\nla la", encoding="utf-8")
+
+    code = generate.main(["--url", server, "--key", "k", "--lyrics-file", str(lyrics), "--description", "lofi",
+                          "--duration", "1", "--out", str(tmp_path / "song.wav"), "--poll", "0.2"])
+
+    assert code == 0
+    assert len(posts) == 2 and posts[0] and posts[0] == posts[1]
+    jobs = json.loads(real(f"{server}/jobs", "k"))
+    assert len(jobs) == 1
+    assert jobs[0]["request_id"] == posts[0]
+
+
+def test_each_client_run_uses_a_fresh_key(server, tmp_path, monkeypatch):
+    real = generate.request
+    keys = []
+
+    def spy(url, key, method="GET", body=None, timeout=60, idempotency_key=None):
+        if method == "POST":
+            keys.append(idempotency_key)
+        return real(url, key, method, body, timeout, idempotency_key)
+
+    monkeypatch.setattr(generate, "request", spy)
+    lyrics = tmp_path / "lyrics.txt"
+    lyrics.write_text("la", encoding="utf-8")
+    for _ in range(2):
+        generate.main(["--url", server, "--key", "k", "--lyrics-file", str(lyrics), "--description", "x",
+                       "--duration", "1", "--out", str(tmp_path / "s.wav"), "--poll", "0.1"])
+    assert len(keys) == 2 and keys[0] != keys[1]

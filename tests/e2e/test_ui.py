@@ -1,4 +1,5 @@
 import re
+import time
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -144,15 +145,64 @@ def test_lost_submit_response_still_shows_the_accepted_take_once(page: Page, ser
     expect(page.locator(".take")).to_have_count(1)
 
 
-@pytest.mark.xfail(strict=True, reason="Task 10: a lost response is reported as 'Not started' instead of 'status unknown'")
-def test_lost_submit_response_is_not_reported_as_not_started(page: Page, server):
+def test_lost_submit_response_shows_status_unknown_until_reconciled(page: Page, server):
     unlocked(page, server)
     lose_submit_response(page)
+
+    def slow_lookup(route):
+        time.sleep(1.5)
+        route.continue_()
+
+    page.route(re.compile(r"/jobs\?request_id="), slow_lookup)
     fill_take(page)
     start_take(page)
     note = page.locator("#formnote")
     expect(note).to_contain_text(re.compile("status unknown", re.I))
     expect(note).not_to_contain_text("Not started")
+    expect(page.locator(".take")).to_have_count(1, timeout=10_000)
+    expect(note).not_to_contain_text("Not started")
+
+
+def test_gateway_error_after_server_accepted_submit_is_reconciled_not_duplicated(page: Page, server):
+    unlocked(page, server)
+
+    def gateway_timeout(route):
+        if route.request.method == "POST":
+            route.fetch()
+            route.fulfill(status=504, body="gateway timeout")
+        else:
+            route.continue_()
+
+    page.route("**/jobs", gateway_timeout)
+    fill_take(page)
+    start_take(page)
+    expect(page.locator(".take")).to_have_count(1, timeout=15_000)
+    expect(page.locator("#formnote")).not_to_contain_text("Not started")
+    expect(page.locator(".take")).to_have_count(1)
+
+
+def test_submit_never_reaching_the_server_is_reported_not_submitted_and_retry_reuses_the_key(page: Page, server):
+    unlocked(page, server)
+    keys = []
+
+    def drop_before_server(route):
+        if route.request.method == "POST":
+            keys.append(route.request.headers.get("idempotency-key"))
+            route.abort("connectionreset")
+        else:
+            route.continue_()
+
+    page.route("**/jobs", drop_before_server)
+    fill_take(page)
+    start_take(page)
+    expect(page.locator("#formnote")).to_contain_text("Not submitted", timeout=15_000)
+    expect(page.get_by_role("button", name="Start take")).to_be_enabled()
+    expect(page.locator("#lyrics")).to_have_value(LYRICS)
+    expect(page.locator(".take")).to_have_count(0)
+
+    start_take(page)
+    expect(page.locator("#formnote")).to_contain_text("Not submitted", timeout=15_000)
+    assert len(keys) == 2 and keys[0] and keys[0] == keys[1]
 
 
 def test_keyboard_tab_order_and_visible_focus(page: Page, server):
