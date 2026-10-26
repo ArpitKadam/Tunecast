@@ -43,3 +43,13 @@ def test_workflow_pushes_immutable_sha_tag_and_latest_with_registry_cache():
     assert "type=registry,ref=arpitkadam/tunecast:buildcache" in wf
     assert "secrets.DOCKERHUB_USERNAME" in wf and "secrets.DOCKERHUB_TOKEN" in wf
     assert "free-disk-space" in wf
+
+
+def test_workflow_gates_publish_on_tests_and_never_publishes_from_pull_requests():
+    wf = (ROOT / ".github" / "workflows" / "docker.yml").read_text(encoding="utf-8")
+    test_job, build_job = wf.split("\n  build:\n")
+    assert "\n  pull_request:" in test_job
+    assert "uv sync --frozen --group dev" in test_job
+    assert "uv run pytest -m e2e" in test_job
+    assert "needs: test" in build_job
+    assert "if: github.event_name != 'pull_request'" in build_job

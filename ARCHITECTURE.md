@@ -43,7 +43,7 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | UI | `tunecast/static/index.html` | Single page, vanilla JS |
 | Client | `client/generate.py`, `client/example-*.txt` | Submit, poll with retries, save; end-to-end proof, plus worked Hindi and English examples |
 | Image | `Dockerfile`, `docker/requirements.txt`, `.dockerignore` | Digest-pinned base, four exact-pinned additions on system Python, ngrok binary by sha256, tini entrypoint |
-| CI | `.github/workflows/docker.yml` | Build and push on `main` / `v*` |
+| CI | `.github/workflows/docker.yml` | `test` job on push, pull request and dispatch (unit tests, then the Playwright e2e suite on chromium); `build` (image build and push to Docker Hub) `needs: test` and never runs on pull requests |
 
 ## Data flow: one generation
 

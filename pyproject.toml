@@ -14,10 +14,13 @@ dependencies = [
 dev = [
     "httpx2>=2.12.0",
     "pytest>=8",
+    "pytest-playwright>=0.10.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not e2e'"
+markers = ["e2e: browser tests against the real app and stub sidecar (needs `playwright install chromium`)"]
 
 [build-system]
 requires = ["hatchling"]
