@@ -18,13 +18,15 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .gpu import query_gpus
-from .jobs import EXPORT_FIELDS, DuplicateRequest, JobRunner, JobStore, UnknownParent, export_row, fingerprint, job_to_dict
+from .jobs import EXPORT_FIELDS, DuplicateRequest, JobRunner, JobStore, QueueFull, UnknownParent, export_row, fingerprint, job_to_dict
 from .sidecar import Sidecar
 
 MAX_DURATION_S = 360
 MAX_LYRICS_CHARS = 20_000
 MAX_DESCRIPTION_CHARS = 10_000
 MAX_SEED = 2**31 - 1
+# ponytail: fixed hint, not derived from the estimator; a slot opens when the running take ends (minutes, estimate is a guess)
+RETRY_AFTER_S = 30
 REQUEST_ID_PATTERN = r"^[A-Za-z0-9_-]{8,128}$"
 EXPERIMENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"     # also matches job IDs, which name an experiment by default
 
@@ -112,6 +114,9 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
 
     @app.post("/jobs", dependencies=auth, status_code=202)
     def submit(req: JobRequest, idempotency_key: str | None = Header(default=None, pattern=REQUEST_ID_PATTERN)):
+        retry = {"Retry-After": str(RETRY_AFTER_S)}     # its presence marks a definitive admission refusal, nothing was created
+        if not state.model and not (idempotency_key and store.get_by_request_id(idempotency_key)):
+            raise HTTPException(status_code=503, detail="the model server is not ready", headers=retry)
         params = req.model_dump()
         lineage = {k: params.pop(k) for k in ("parent_job_id", "experiment_id")}
         # lineage joins the fingerprint only when set, so bodies without it keep their pre-lineage hashes
@@ -120,7 +125,13 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
         if params["seed"] is None:
             params["seed"] = secrets.randbelow(MAX_SEED + 1)
         try:
-            job = store.create(params, idempotency_key, digest, **lineage, model_revision=settings.model_revision, config_snapshot=config_snapshot)
+            job = store.create(params, idempotency_key, digest, settings.max_queued, **lineage, model_revision=settings.model_revision, config_snapshot=config_snapshot)
+        except QueueFull as full:
+            raise HTTPException(
+                status_code=429,
+                detail=f"queue is full ({full.queued} of {settings.max_queued} takes waiting)",
+                headers=retry,
+            ) from None
         except DuplicateRequest as dup:
             if dup.job.request_hash != digest:
                 raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different request") from None
@@ -172,7 +183,7 @@ def create_app(settings: Settings, store: JobStore, runner: JobRunner, sidecar: 
     def delete_job(job_id: str):
         load_job(job_id)
         if not store.delete(job_id):
-            raise HTTPException(status_code=409, detail="job is running")
+            raise HTTPException(status_code=409, detail="a running job cannot be cancelled; delete it once it finishes")
         return Response(status_code=204)
 
     @app.get("/", response_class=HTMLResponse)

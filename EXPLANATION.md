@@ -3,6 +3,13 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-10-26 — Task 11: bounded queue admission and cancel
+
+- **What changed:** At most `TUNECAST_MAX_QUEUED` (default 8) takes can wait. A submit beyond that gets 429 with `Retry-After`; a submit before the model server is ready gets 503 with `Retry-After`. Neither creates anything. Replaying an existing `Idempotency-Key` still returns its job on a full queue. Deleting a queued take cancels it; deleting a running take is refused with 409. The page shows the refusal with the retry time, keeps the draft, and labels the button Cancel, Can't cancel or Delete.
+- **How it works:** `JobStore.create` counts queued rows, checks the request key and inserts under one lock hold, and raises `QueueFull` when full. `submit` turns that into 429. The worker skips ids whose job is gone or not `queued` and claims a job with a conditional update. The 503 guard reads `ReadyState.model`.
+- **How it was verified:** `uv run pytest -q`: 185 passed, 17 deselected. `uv run pytest -m e2e -q`: 15 passed, 2 xfailed (Task 14's). Tests cover cap and cap+1 (429, nothing created), concurrent submits at the boundary (16 store threads, 12 API threads) never exceeding the cap, replay at a full queue (200, 409 for a changed body), 503, queued cancel never reaching the sidecar, running cancel 409, both worker-skip races, and config validation; e2e covers the 429 message with the draft kept and the cancel buttons. Task 11 was built in a separate worktree and merged onto Task 12 by three-way merge; the merged tree passes both suites. Reviewer verdict GREEN; its readiness-probe finding was fixed.
+- **Limitations / follow-ups:** `Retry-After` is a fixed 30 s. A cancelled id stays in the in-memory queue until popped. `client/generate.py` does not honour `Retry-After`. `/ready` is unchanged.
+
 ## 2026-10-26 — Task 12: experiment lineage and honest measurements
 
 - **What changed:** Every job records its parent, its experiment, the model revision and a small config snapshot. Real-time factor and peak GPU memory are measured instead of guessed, the progress estimator learns from the actual audio length, and an experiment exports as JSON or CSV. Each take shows seed, queue time, inference time, real-time factor and what changed against its parent; "Refine" starts a child take and "Export experiment" downloads the file.

@@ -29,19 +29,20 @@ class FailingSidecar:
         return {"kind": "failing"}
 
 
-def build(tmp_path, sidecar=None, delay_s=0.3):
+def build(tmp_path, sidecar=None, delay_s=0.3, env=None):
     settings = load_settings({
         "TUNECAST_API_KEY": KEY,
         "NGROK_ENABLED": "0",
         "TUNECAST_STUB": "1",
         "TUNECAST_DATA_DIR": str(tmp_path),
+        **(env or {}),
     })
     sidecar = sidecar or StubSidecar(delay_s=delay_s)
     store = JobStore(settings.db_path, settings.outputs_dir)
     estimator = Estimator()
     runner = JobRunner(store, sidecar, settings.max_concurrent, estimator, settings.keep_last, logging.getLogger("test"))
     runner.start()
-    state = ReadyState()
+    state = ReadyState(model=True)
     app = create_app(settings, store, runner, sidecar, state)
     return TestClient(app), state, store
 
@@ -70,6 +71,7 @@ def test_health_open(client):
 
 def test_ready_503_until_both_flags(tmp_path):
     client, state, _ = build(tmp_path)
+    state.model = False
     assert client.get("/ready").status_code == 503
     assert client.get("/ready").json() == {"model": False, "tunnel": False}
     state.model = True
@@ -336,3 +338,119 @@ def test_deleted_job_frees_its_key(client):
     again = client.post("/jobs", json=BODY, headers=keyed())
     assert again.status_code == 202
     assert again.json()["id"] != first["id"]
+
+
+class GateSidecar(StubSidecar):
+    """Holds every generation until released, so tests control exactly which jobs are running or queued."""
+
+    def __init__(self):
+        super().__init__(delay_s=0)
+        self.gate = threading.Event()
+        self.calls = 0
+
+    def generate(self, params, out_path):
+        self.calls += 1
+        self.gate.wait(10)
+        return super().generate(params, out_path)
+
+
+@pytest.fixture
+def gated(tmp_path):
+    """Cap of 2 queued jobs; the first job is running and held, so each further submit sits in the queue."""
+    sidecar = GateSidecar()
+    client, _, store = build(tmp_path, sidecar=sidecar, env={"TUNECAST_MAX_QUEUED": "2"})
+    running = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    wait_for(client, running, "running")
+    yield client, sidecar, store, running
+    sidecar.gate.set()
+
+
+def queued_count(client):
+    return sum(j["status"] == "queued" for j in client.get("/jobs", headers=AUTH).json())
+
+
+def test_running_job_does_not_count_toward_the_cap_and_cap_plus_one_is_429(gated):
+    client, _, _, _ = gated
+    assert [client.post("/jobs", json=BODY, headers=AUTH).status_code for _ in range(2)] == [202, 202]
+    before = [j["id"] for j in client.get("/jobs", headers=AUTH).json()]
+    rejected = client.post("/jobs", json=BODY, headers=AUTH)
+    assert rejected.status_code == 429
+    assert int(rejected.headers["retry-after"]) > 0
+    assert "queue is full" in rejected.json()["detail"]
+    assert [j["id"] for j in client.get("/jobs", headers=AUTH).json()] == before
+    assert queued_count(client) == 2
+
+
+def test_slot_frees_when_a_queued_job_is_cancelled(gated):
+    client, _, _, _ = gated
+    ids = [client.post("/jobs", json=BODY, headers=AUTH).json()["id"] for _ in range(2)]
+    assert client.post("/jobs", json=BODY, headers=AUTH).status_code == 429
+    assert client.delete(f"/jobs/{ids[0]}", headers=AUTH).status_code == 204
+    assert client.post("/jobs", json=BODY, headers=AUTH).status_code == 202
+
+
+def test_replay_of_an_existing_key_returns_200_when_the_queue_is_full(gated):
+    client, _, _, _ = gated
+    first = client.post("/jobs", json=BODY, headers=keyed("req-aaaaaaaaaa"))
+    client.post("/jobs", json=BODY, headers=AUTH)
+    assert queued_count(client) == 2
+    replay = client.post("/jobs", json=BODY, headers=keyed("req-aaaaaaaaaa"))
+    assert replay.status_code == 200
+    assert replay.json()["id"] == first.json()["id"]
+    assert client.post("/jobs", json={**BODY, "seed": 8}, headers=keyed("req-aaaaaaaaaa")).status_code == 409
+    assert client.post("/jobs", json=BODY, headers=keyed("req-bbbbbbbbbb")).status_code == 429
+    assert queued_count(client) == 2
+
+
+def test_concurrent_submits_never_exceed_the_cap(gated):
+    client, _, _, _ = gated
+    barrier = threading.Barrier(12)
+    codes = []
+
+    def post():
+        barrier.wait()
+        codes.append(client.post("/jobs", json=BODY, headers=AUTH).status_code)
+
+    threads = [threading.Thread(target=post) for _ in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert codes.count(202) == 2 and codes.count(429) == 10
+    assert queued_count(client) == 2
+
+
+def test_model_not_ready_is_503_with_retry_after_and_creates_nothing(tmp_path):
+    client, state, store = build(tmp_path)
+    state.model = False
+    r = client.post("/jobs", json=BODY, headers=keyed("req-aaaaaaaaaa"))
+    assert r.status_code == 503
+    assert int(r.headers["retry-after"]) > 0
+    assert store.get_by_request_id("req-aaaaaaaaaa") is None
+    assert client.get("/jobs", headers=AUTH).json() == []
+    state.model = True
+    first = client.post("/jobs", json=BODY, headers=keyed("req-aaaaaaaaaa"))
+    state.model = False
+    replay = client.post("/jobs", json=BODY, headers=keyed("req-aaaaaaaaaa"))
+    assert replay.status_code == 200 and replay.json()["id"] == first.json()["id"]
+
+
+def test_cancelled_queued_job_never_runs(gated):
+    client, sidecar, store, running = gated
+    queued = client.post("/jobs", json=BODY, headers=AUTH).json()["id"]
+    assert client.delete(f"/jobs/{queued}", headers=AUTH).status_code == 204
+    assert client.get(f"/jobs/{queued}", headers=AUTH).status_code == 404
+    sidecar.gate.set()
+    wait_for(client, running, "succeeded")
+    time.sleep(0.2)
+    assert sidecar.calls == 1
+    assert not store.audio_path(queued).exists()
+
+
+def test_cancelling_a_running_job_is_409_and_explains_why(gated):
+    client, sidecar, _, running = gated
+    r = client.delete(f"/jobs/{running}", headers=AUTH)
+    assert r.status_code == 409
+    assert "cannot be cancelled" in r.json()["detail"]
+    sidecar.gate.set()
+    wait_for(client, running, "succeeded")

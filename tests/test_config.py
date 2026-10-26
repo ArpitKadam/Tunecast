@@ -39,6 +39,7 @@ def test_defaults():
     assert s.sidecar_port == 8000
     assert s.max_concurrent == 1
     assert s.keep_last == 200
+    assert s.max_queued == 8
     assert s.dit_steps is None
     assert s.dit_cfg_scale is None
     assert s.hf_token is None
@@ -85,3 +86,13 @@ def test_port_out_of_range_raises():
         load_settings({**BASE, "TUNECAST_PORT": "70000"})
     with pytest.raises(ConfigError, match="TUNECAST_SIDECAR_PORT"):
         load_settings({**BASE, "TUNECAST_SIDECAR_PORT": "0"})
+
+
+def test_max_queued_parsed():
+    assert load_settings({**BASE, "TUNECAST_MAX_QUEUED": "3"}).max_queued == 3
+
+
+@pytest.mark.parametrize("bad", ["0", "-2", "many", "1.5"])
+def test_invalid_max_queued_raises(bad):
+    with pytest.raises(ConfigError, match="TUNECAST_MAX_QUEUED"):
+        load_settings({**BASE, "TUNECAST_MAX_QUEUED": bad})

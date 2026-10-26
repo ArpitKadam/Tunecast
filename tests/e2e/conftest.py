@@ -22,21 +22,37 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+class HeldSidecar(StubSidecar):
+    """Generations block until release() so a test can hold one job running and the rest queued."""
+
+    def __init__(self):
+        super().__init__(delay_s=0)
+        self._gate = threading.Event()
+
+    def generate(self, params, out_path):
+        self._gate.wait(30)
+        return super().generate(params, out_path)
+
+    def release(self) -> None:
+        self._gate.set()
+
+
 class LiveServer:
     """The real app on a real socket; stop() and start() simulate the pod dropping off and coming back."""
 
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, env=None, sidecar=None):
         settings = load_settings({
             "TUNECAST_API_KEY": KEY,
             "NGROK_ENABLED": "0",
             "TUNECAST_STUB": "1",
             "TUNECAST_DATA_DIR": str(tmp_path),
+            **(env or {}),
         })
-        sidecar = StubSidecar(delay_s=0.2)
+        sidecar = sidecar or StubSidecar(delay_s=0.2)
         store = JobStore(settings.db_path, settings.outputs_dir)
         runner = JobRunner(store, sidecar, settings.max_concurrent, Estimator(), settings.keep_last, logging.getLogger("e2e"))
         runner.start()
-        self.state = ReadyState()
+        self.state = ReadyState(model=True)
         self.app = create_app(settings, store, runner, sidecar, self.state)
         self.port = free_port()
         self.url = f"http://127.0.0.1:{self.port}"
@@ -69,11 +85,34 @@ class LiveServer:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return json.load(resp)
 
+    def status(self, job_id: str) -> str:
+        req = urllib.request.Request(f"{self.url}/jobs/{job_id}", headers={"Authorization": f"Bearer {KEY}"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.load(resp)["status"]
+
 
 @pytest.fixture
 def server(tmp_path):
     srv = LiveServer(tmp_path)
     srv.start()
     yield srv
+    if srv._thread.is_alive():
+        srv.stop()
+
+
+@pytest.fixture
+def full_queue_server(tmp_path):
+    """Cap of 1 queued take: one take running (held) and one queued, so the next submit is refused."""
+    sidecar = HeldSidecar()
+    srv = LiveServer(tmp_path, env={"TUNECAST_MAX_QUEUED": "1"}, sidecar=sidecar)
+    srv.start()
+    running = srv.submit()["id"]
+    deadline = time.monotonic() + 10
+    while srv.status(running) != "running":
+        assert time.monotonic() < deadline, "first take never started"
+        time.sleep(0.02)
+    srv.submit()
+    yield srv
+    sidecar.release()
     if srv._thread.is_alive():
         srv.stop()

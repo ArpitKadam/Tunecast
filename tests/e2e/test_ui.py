@@ -287,3 +287,27 @@ def test_refined_take_shows_seed_timings_real_time_factor_and_prompt_diff(page: 
     assert len(rows) == 2
     assert rows[1]["parent_job_id"] == rows[0]["job_id"] and rows[1]["experiment_id"] == rows[0]["job_id"]
 
+
+def test_full_queue_shows_retry_after_and_keeps_the_draft(page: Page, full_queue_server):
+    unlocked(page, full_queue_server)
+    expect(page.locator(".take")).to_have_count(2)
+    fill_take(page)
+    start_take(page)
+    note = page.locator("#formnote")
+    expect(note).to_contain_text("Not started: queue is full")
+    expect(note).to_contain_text("try again in 30 s")
+    expect(page.locator(".take")).to_have_count(2)
+    expect(page.locator("#lyrics")).to_have_value(LYRICS)
+    expect(page.locator("#description")).to_have_value(STYLE)
+
+
+def test_queued_take_can_be_cancelled_but_a_running_one_cannot(page: Page, full_queue_server):
+    unlocked(page, full_queue_server)
+    expect(page.locator(".take")).to_have_count(2)
+    running = page.locator(".take.running")
+    expect(running.get_by_role("button", name="Can't cancel")).to_be_disabled()
+    queued = page.locator(".take.queued")
+    queued.get_by_role("button", name="Cancel").click()
+    queued.get_by_role("button", name="Really cancel").click()
+    expect(page.locator(".take")).to_have_count(1)
+    expect(page.locator(".take.running")).to_have_count(1)

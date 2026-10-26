@@ -259,10 +259,15 @@ Softly the world begins to breathe"></textarea>
     $("submit").disabled = true; note.textContent = ""; note.classList.remove("error");
     try {
       const r = await api("/jobs", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": pending.id }, body: text });
-      if (r.status >= 500) throw new Error("server error");
+      if (r.status >= 500 && !r.headers.get("Retry-After")) throw new Error("server error");   // Retry-After: the server refused admission, so nothing was created
       pending = null;
       if (r.ok) { parentId = null; note.textContent = r.status === 202 ? "Queued." : "Already submitted."; await poll(); }
-      else { const d = await r.json().catch(() => ({})); if (typeof d.detail === "string") parentId = null; note.textContent = "Not started: " + (typeof d.detail === "string" ? d.detail : d.detail ? JSON.stringify(d.detail) : r.status); note.classList.add("error"); }
+      else {
+        const d = await r.json().catch(() => ({})), wait = r.headers.get("Retry-After");
+        if (typeof d.detail === "string" && !wait) parentId = null;
+        note.textContent = "Not started: " + (typeof d.detail === "string" ? d.detail : d.detail ? JSON.stringify(d.detail) : r.status) + (wait ? `. Your draft is kept, try again in ${wait} s.` : "");
+        note.classList.add("error");
+      }
     } catch (err) {
       if (err.message === "unauthorized") { pending = null; note.textContent = "Not started: unauthorized"; return; }
       note.textContent = "Submission status unknown, checking…";
@@ -354,7 +359,11 @@ Softly the world begins to breathe"></textarea>
     const done = job.status === "succeeded";
     row.querySelector(".load").hidden = !done || blobs.has(job.id);
     row.querySelector(".save").hidden = !blobs.has(job.id);
-    row.querySelector(".del").disabled = job.status === "running";
+    const delBtn = row.querySelector(".del");
+    delBtn.dataset.verb = job.status === "queued" ? "Cancel" : job.status === "running" ? "Can't cancel" : "Delete";
+    if (delBtn.dataset.armed !== "1") delBtn.textContent = delBtn.dataset.verb;
+    delBtn.disabled = job.status === "running";
+    delBtn.title = job.status === "running" ? "A running take cannot be cancelled: the model server has no cancel. Delete it once it finishes." : "";
   }
 
   const secs = (s) => s < 60 ? s.toFixed(1) + "s" : fmt(s);
@@ -409,8 +418,8 @@ Softly the world begins to breathe"></textarea>
   function revoke(id) { const u = blobs.get(id); if (u) { URL.revokeObjectURL(u); blobs.delete(id); } }
 
   async function del(id, btn) {
-    if (btn.dataset.armed !== "1") { btn.dataset.armed = "1"; btn.textContent = "Really delete"; setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Delete"; }, 4000); return; }
-    try { const r = await api(`/jobs/${id}`, { method: "DELETE" }); if (r.status === 204) { revoke(id); await poll(); } else { btn.textContent = "Delete failed"; } } catch {}
+    if (btn.dataset.armed !== "1") { btn.dataset.armed = "1"; btn.textContent = "Really " + btn.dataset.verb.toLowerCase(); setTimeout(() => { btn.dataset.armed = ""; btn.textContent = btn.dataset.verb; }, 4000); return; }
+    try { const r = await api(`/jobs/${id}`, { method: "DELETE" }); if (r.status === 204) { revoke(id); await poll(); } else { btn.textContent = r.status === 409 ? "Now running, can't cancel" : "Delete failed"; } } catch {}
   }
 
   ready(); setInterval(ready, 10000);

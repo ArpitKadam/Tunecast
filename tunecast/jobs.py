@@ -87,6 +87,14 @@ class UnknownParent(Exception):
     """parent_job_id does not name an existing job."""
 
 
+class QueueFull(Exception):
+    """Admission refused: `queued` jobs are already waiting and none of them is this request's replay."""
+
+    def __init__(self, queued: int):
+        super().__init__(queued)
+        self.queued = queued
+
+
 def new_job_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
 
@@ -152,11 +160,15 @@ class JobStore:
         return self.outputs_dir / f"{job_id}.wav"
 
     def create(
-        self, params: dict, request_id: str | None = None, request_hash: str | None = None, *,
+        self, params: dict, request_id: str | None = None, request_hash: str | None = None, max_queued: int | None = None, *,
         parent_job_id: str | None = None, experiment_id: str | None = None,
         model_revision: str | None = None, config_snapshot: dict | None = None,
     ) -> Job:
         """Raises DuplicateRequest when request_id already belongs to a job; the UNIQUE index decides races.
+
+        Raises QueueFull when max_queued jobs are in status `queued` (a running job does not count). The count
+        and the insert share one lock hold, so concurrent submits cannot both take the last slot. A replay of an
+        existing request_id is never refused for capacity: it raises DuplicateRequest first.
 
         Raises UnknownParent when parent_job_id names no job. The experiment is the one given, else the parent's,
         else the job's own id, so a branch always groups with the take it came from.
@@ -169,6 +181,10 @@ class JobStore:
                 row = self._db.execute("SELECT * FROM jobs WHERE request_id = ?", (request_id,)).fetchone()
                 if row:
                     raise DuplicateRequest(Job.from_row(row))
+            if max_queued is not None:
+                queued = self._db.execute("SELECT COUNT(*) FROM jobs WHERE status = 'queued'").fetchone()[0]
+                if queued >= max_queued:
+                    raise QueueFull(queued)
             inherited = None
             if parent_job_id:
                 parent = self._db.execute("SELECT experiment_id FROM jobs WHERE id = ?", (parent_job_id,)).fetchone()
@@ -347,7 +363,8 @@ class JobRunner:
             return
         started_at = utcnow()
         queue_wait_s = (parse_ts(started_at) - parse_ts(job.created_at)).total_seconds()
-        self.store.update(job_id, status="running", started_at=started_at)
+        if self.store.update(job_id, status="running", started_at=started_at) == 0:
+            return      # cancelled between the read above and now
         log_event(self.logger, "job_started", job_id=job_id, queue_wait_s=round(queue_wait_s, 3), duration_s=job.params.get("duration_s"))
 
         params = GenerateParams(**job.params)

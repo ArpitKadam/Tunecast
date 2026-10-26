@@ -71,6 +71,7 @@ Environment variables on the template:
 | `HF_TOKEN` | optional, lifts Hugging Face rate limits |
 | `TUNECAST_MAX_CONCURRENT` | optional, default `1` |
 | `TUNECAST_KEEP_LAST` | optional, default `200` |
+| `TUNECAST_MAX_QUEUED` | optional, default `8`; jobs allowed to wait in `queued` (a running job does not count); at least 1 |
 | `TUNECAST_DIT_STEPS`, `TUNECAST_DIT_CFG_SCALE` | optional sidecar knobs, leave unset |
 
 `.env.example` documents every variable and every baked constant.
@@ -109,12 +110,12 @@ clients.
 
 | Method | Path | What |
 | --- | --- | --- |
-| POST | `/jobs` | body `{"lyrics","description","duration_s":180,"seed":null,"format":"wav"}` → 202 with the job. Optional `parent_job_id` (must exist, else 422) and `experiment_id`; a child inherits its parent's experiment, a root starts its own |
+| POST | `/jobs` | body `{"lyrics","description","duration_s":180,"seed":null,"format":"wav"}` → 202 with the job. Optional `parent_job_id` (must exist, else 422) and `experiment_id`; a child inherits its parent's experiment, a root starts its own; 429 when the queue is full, 503 when the model server is not ready (both carry `Retry-After`, nothing is created) |
 | GET | `/jobs?limit=50` | newest first |
 | GET | `/jobs/{id}` | status, `queue_position` (jobs ahead), `progress` (estimate), `estimate` (`seconds`, `confidence` low\|medium; null once finished), `timings` (`queue_wait_s`, `inference_s`), `real_time_factor`, `gpu` (peak memory per GPU during inference), lineage, `model_revision`, `config_snapshot`, `error` |
 | GET | `/jobs/{id}/audio` | the WAV (409 until succeeded) |
 | GET | `/experiments/{id}/export?format=json\|csv` | every job in the experiment with lineage and measurements, as a download. 404 unknown experiment, 422 bad format |
-| DELETE | `/jobs/{id}` | 204; 409 while running |
+| DELETE | `/jobs/{id}` | 204; cancels a queued job, deletes a finished one; 409 while running (a running job cannot be cancelled) |
 | GET | `/info` | model, revision, sidecar, GPUs, limits |
 
 Limits: lyrics ≤ 20 000 chars, description ≤ 10 000, `duration_s` 1–360,

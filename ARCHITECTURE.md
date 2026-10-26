@@ -47,8 +47,8 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 
 ## Data flow: one generation
 
-1. `POST /jobs` → auth → pydantic validation + optional `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, else 422) → fingerprint the body (before the random seed is filled) → fill seed → optional lineage fields `parent_job_id` / `experiment_id` (fingerprinted only when set, so older retries keep their hashes) → `JobStore.create` (resolves the experiment: root = own id, child inherits; unknown parent → 422, checked after the duplicate-key check) (status `queued`) → `JobRunner.submit(id)` → 202 with job JSON. A key already on a job raises `DuplicateRequest`: same fingerprint → 200 with the existing job, different → 409, nothing enqueued either way. `GET /jobs?request_id=<id>` returns `[job]` or `[]` so a client can reconcile after a lost response.
-2. Worker thread pops the id, `JobStore.update(status="running", started_at=…)`, builds the sidecar payload (`input`, `instructions`, `seed`, `max_new_tokens = duration_s × 25`, `response_format`, `stream=false`), POSTs to `http://127.0.0.1:8000/v1/audio/speech`.
+1. `POST /jobs` → auth → 503 + `Retry-After` while `ReadyState.model` is false (a replay of an existing key still returns its job) → pydantic validation + optional `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, else 422) → fingerprint the body (before the random seed is filled) → fill seed → optional lineage fields `parent_job_id` / `experiment_id` (fingerprinted only when set, so older retries keep their hashes) → `JobStore.create` (resolves the experiment: root = own id, child inherits; unknown parent → 422, checked after the duplicate-key check) (status `queued`) → `JobRunner.submit(id)` → 202 with job JSON. `create` also counts `queued` rows under the store lock: at or over `TUNECAST_MAX_QUEUED` (default 8) it raises `QueueFull` → 429 + `Retry-After: 30`, nothing inserted or enqueued. A key already on a job raises `DuplicateRequest` first, so a replay is never refused for capacity: same fingerprint → 200 with the existing job, different → 409, nothing enqueued either way. `GET /jobs?request_id=<id>` returns `[job]` or `[]` so a client can reconcile after a lost response.
+2. Worker thread pops the id, skips it if the job is gone or no longer `queued` (cancelled), claims it with a conditional update (0 rows = cancelled meanwhile), `JobStore.update(status="running", started_at=…)`, builds the sidecar payload (`input`, `instructions`, `seed`, `max_new_tokens = duration_s × 25`, `response_format`, `stream=false`), POSTs to `http://127.0.0.1:8000/v1/audio/speech`.
 3. The body must be non-empty and complete (Content-Length enforced); `inspect_wav` checks the RIFF/WAVE header, fmt (PCM, float or EXTENSIBLE) and a data chunk of whole frames that fits in the bytes received. Only then is it written atomically (`.part`, `os.replace`) to `outputs/<id>.wav`. Duration, sample rate, channels and size are stored; `timings`, `gpu` captured; status `succeeded`. Any failure (bad body, truncation, timeout, disk error) → no file left, status `failed`, `error` filled.
 4. `GET /jobs/{id}` returns the row plus computed `queue_position` (jobs ahead: running + queued earlier) and `progress` (estimate, capped 0.95 while running). Live jobs also carry `estimate {seconds, confidence: low|medium}`; finished jobs carry `real_time_factor` (inference seconds ÷ real audio seconds). The `Estimator` learns from `audio_duration_s`, not the requested ceiling.
 5. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`. `GET /experiments/{id}/export?format=json|csv` returns the experiment's jobs in the flat `EXPORT_FIELDS` schema (404 unknown experiment, 422 bad format).
@@ -73,7 +73,7 @@ class Sidecar(Protocol):
     def describe(self) -> dict: ...
 
 # jobs.py
-class JobStore:  create(params, request_id=None, request_hash=None) -> Job   # raises DuplicateRequest(job)
+class JobStore:  create(params, request_id=None, request_hash=None, max_queued=None, *, lineage…) -> Job   # raises DuplicateRequest(job) | QueueFull(queued) | UnknownParent
                  get(id) -> Job | None; get_by_request_id(id) -> Job | None; list(limit) -> list[Job]
                  update(id, **fields) -> int (rows changed); delete(id) -> bool (False if running/unknown)
                  ahead_of(id) -> int; queued_ids() -> list[str]; mark_stale_failed() -> int; prune(keep_last) -> list[str]
@@ -102,6 +102,7 @@ Boot order: env → weights → sidecar ready → job store/workers → **bind A
 - `POST /jobs` never waits on inference; a job outlives any client, and is recoverable by id until its pod dies.
 - `/ready` is 200 only while both the sidecar and the tunnel are up.
 - A job that stops running for any reason ends `succeeded` or `failed`, never stuck.
+- `DELETE /jobs/{id}`: a `queued` job is cancelled (row removed, never reaches the sidecar), a finished job is deleted, a `running` job returns 409 because the sidecar has no cancel.
 - At most one job per non-null `request_id`; the UNIQUE index decides, not application code. A job is enqueued only by the call that inserted it. Deleting or pruning a job frees its key. The UI and CLI reuse one key for every retry of a submission, including after a 5xx.
 - Nothing under `/workspace` is required to exist at boot; boot creates what it needs.
 - Secrets never appear in logs, the image, or the repo.

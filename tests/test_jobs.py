@@ -1,13 +1,14 @@
 import json
 import logging
 import sqlite3
+import threading
 import wave
 from pathlib import Path
 
 import pytest
 
 from tunecast.gpu import parse_nvidia_smi, query_gpus
-from tunecast.jobs import DuplicateRequest, Estimator, Job, JobStore, fingerprint, new_job_id
+from tunecast.jobs import DuplicateRequest, Estimator, Job, JobRunner, JobStore, QueueFull, fingerprint, new_job_id
 from tunecast.sidecar import GenerateParams, SidecarError, StubSidecar
 
 LOG = logging.getLogger("test")
@@ -231,3 +232,83 @@ def test_fingerprint_ignores_key_order_and_sees_changes():
     assert fingerprint({"a": 1, "b": 2}) == fingerprint({"b": 2, "a": 1})
     assert fingerprint(PARAMS) != fingerprint({**PARAMS, "seed": 8})
 
+
+def test_create_refuses_past_max_queued_but_not_a_replay(store):
+    store.create(PARAMS, "req-0123456789", "h", max_queued=2)
+    store.create(PARAMS, max_queued=2)
+    with pytest.raises(QueueFull):
+        store.create(PARAMS, max_queued=2)
+    with pytest.raises(DuplicateRequest):
+        store.create(PARAMS, "req-0123456789", "h", max_queued=2)
+    assert len(store.queued_ids()) == 2
+
+
+def test_running_jobs_do_not_fill_the_queue(store):
+    running = store.create(PARAMS, max_queued=1)
+    store.update(running.id, status="running")
+    store.create(PARAMS, max_queued=1)
+    with pytest.raises(QueueFull):
+        store.create(PARAMS, max_queued=1)
+
+
+def test_concurrent_creates_at_the_boundary_admit_exactly_the_cap(store):
+    outcomes = []
+    barrier = threading.Barrier(16)
+
+    def attempt():
+        barrier.wait()
+        try:
+            store.create(PARAMS, max_queued=3)
+            outcomes.append("ok")
+        except QueueFull:
+            outcomes.append("full")
+
+    threads = [threading.Thread(target=attempt) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert outcomes.count("ok") == 3 and outcomes.count("full") == 13
+    assert len(store.queued_ids()) == 3
+
+
+class RecordingSidecar(StubSidecar):
+    def __init__(self):
+        super().__init__(delay_s=0)
+        self.generated = []
+
+    def generate(self, params, out_path):
+        self.generated.append(params)
+        return super().generate(params, out_path)
+
+
+@pytest.fixture
+def runner(store):
+    sidecar = RecordingSidecar()
+    return JobRunner(store, sidecar, 1, Estimator(), 200, LOG), sidecar
+
+
+def test_worker_skips_an_id_that_was_cancelled_while_queued(store, runner):
+    runner, sidecar = runner
+    job = store.create(PARAMS)
+    runner.submit(job.id)
+    assert store.delete(job.id) is True
+    runner.start()
+    runner._queue.join()
+    assert sidecar.generated == []
+
+
+def test_worker_skips_a_job_cancelled_between_its_read_and_the_claim(store, runner):
+    runner, sidecar = runner
+    job = store.create(PARAMS)
+    real_get = store.get
+
+    def get_then_cancel(job_id):
+        found = real_get(job_id)
+        store.delete(job_id)
+        return found
+
+    store.get = get_then_cancel
+    runner._run(job.id)
+    assert sidecar.generated == []
+    assert real_get(job.id) is None

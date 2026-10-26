@@ -10,6 +10,7 @@ from pathlib import Path
 MODEL_ID = "MiniMaxAI/MiniMax-Music3"
 MODEL_REVISION = "fbdf52fbaaca799592917417eb05f1899f1255ec"
 MAX_CONCURRENT_CAP = 4
+DEFAULT_MAX_QUEUED = 8
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -30,6 +31,7 @@ class Settings:
     sidecar_port: int
     max_concurrent: int
     keep_last: int
+    max_queued: int
     dit_steps: int | None
     dit_cfg_scale: float | None
     model_id: str = MODEL_ID
@@ -79,6 +81,13 @@ def _port(env: Mapping[str, str], name: str, default: int) -> int:
     value = _int(env, name, default)
     if not 1 <= value <= 65535:
         raise ConfigError(f"{name} must be between 1 and 65535, got {value}")
+    return value
+
+
+def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
+    value = _int(env, name, default)
+    if value < 1:
+        raise ConfigError(f"{name} must be at least 1, got {value}")
     return value
 
 
@@ -133,6 +142,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         sidecar_port=_port(env, "TUNECAST_SIDECAR_PORT", 8000),
         max_concurrent=max_concurrent,
         keep_last=max(_int(env, "TUNECAST_KEEP_LAST", 200), 1),
+        max_queued=_positive_int(env, "TUNECAST_MAX_QUEUED", DEFAULT_MAX_QUEUED),
         dit_steps=_int(env, "TUNECAST_DIT_STEPS", None),
         dit_cfg_scale=_float(env, "TUNECAST_DIT_CFG_SCALE"),
         model_revision=_str(env, "TUNECAST_MODEL_REVISION") or MODEL_REVISION,

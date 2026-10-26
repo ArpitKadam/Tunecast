@@ -42,7 +42,7 @@ def build(tmp_path, sidecar=None):
     store = JobStore(settings.db_path, settings.outputs_dir)
     runner = JobRunner(store, sidecar, settings.max_concurrent, Estimator(), settings.keep_last, logging.getLogger("test"))
     runner.start()
-    return TestClient(create_app(settings, store, runner, sidecar, ReadyState())), store
+    return TestClient(create_app(settings, store, runner, sidecar, ReadyState(model=True))), store
 
 
 @pytest.fixture
