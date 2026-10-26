@@ -3,6 +3,21 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-10-26 — Issue backlog written into TASK.md
+
+- **What changed:** The eight open GitHub issues (#1–#8) are now Tasks 8–15
+  in `TASK.md`, each with dependencies and acceptance criteria. Docs only; no
+  code touched.
+- **How it works:** Issue bodies were read with `gh issue view`, then ordered
+  by the dependencies the issues state themselves (see `DECISIONS.md`,
+  2026-10-26). Task numbers continue the existing table; `#n` means the
+  GitHub issue.
+- **How it was verified:** `gh issue list --state all` returned exactly eight
+  issues, all open, numbers 1–8; each appears once in the new table.
+- **Limitations / follow-ups:** Owner rulings recorded the same day: #7
+  per-user access skipped, #6 queue cap approved (default 8), #8 uses no new
+  measurements. Nothing implemented yet; waiting on "Go for Task 8".
+
 ## 2026-09-03 — Task 7: pod verification run
 
 - **What happened:** The first real pod on 2 × L40S (driver 580.178.04)

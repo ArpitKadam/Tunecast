@@ -3,6 +3,18 @@
 Append-only, newest first. Each entry records what was chosen, what else was
 on the table, and the evidence that settled it.
 
+## 2026-10-26 — Scope rulings on the GitHub issue backlog
+- **Decision:** (1) #7's per-user access and quotas are not built. (2) #6's queue cap is built: whole-server limit, default 8, env-configurable. (3) #8 adds no new measurements.
+- **Alternatives considered:** per-user accounts for a public deployment; no admission limit; new pod runs for multi-prompt/seed benchmarks.
+- **Why:** Original spec puts multi-user and per-client rate limiting out of scope, and usage is about 3–4 songs a month on one shared key. A queue cap is protection against accidental paid-GPU backlog, not per-client throttling. New measurements cost pod credits and the owner runs the pod by hand.
+- **Consequences:** The app stays single-key; do not share the URL broadly. Revisit if it goes public. The portfolio shows one measured run, labelled as such.
+
+## 2026-10-26 — Order of the GitHub issue backlog
+- **Decision:** CI gate (#3) → audio validation (#4) → idempotency (#2) → queue bounds (#6) → lineage (#5) → tabs UI (#1) → network/auth state (#7) → portfolio (#8), as Tasks 8–15 in `TASK.md`. One task per gate.
+- **Alternatives considered:** Issue-number order; UI first (#1) because it is the most visible; merging #7 into #1 since both rewrite `static/index.html`.
+- **Why:** Issues #2, #5 and #6 each say they must precede reruns, sweeps or batches, and #5 needs the real duration from #4. The tabs UI consumes all four, so it goes after them. #3 goes first so every later change runs under a test gate. #7 follows #1 because #1 extracts the page JS/CSS; doing #7 first would mean rewriting it twice. #8 needs the final UI for screenshots. #3's tab-specific browser tests cannot exist before #1, so that part moves into Task 13.
+- **Consequences:** The UI work waits behind four backend tasks. Revisit if the owner wants a visible UI change sooner; Tasks 9–12 do not depend on the UI.
+
 ## 2026-09-03 — Client retries transport failures, not 4xx
 - **Decision:** `client/generate.py` retries transport errors and 5xx responses five times, three seconds apart, while polling and downloading. It does not retry 4xx, and the initial submit stays single-shot. On giving up it prints the job URL.
 - **Alternatives considered:** failing fast on any error (the original behaviour); retrying everything including submit; an exponential backoff.

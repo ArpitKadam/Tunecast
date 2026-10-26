@@ -97,3 +97,91 @@ These override the clauses above. Reasoning in `DECISIONS.md`; full design in
 | 5 | Dockerfile, GPU dependency lock, GitHub Actions workflow, first image on Docker Hub | done 2026-09-03 (run 33687738008, `sha-7ddf5a7`) |
 | 6 | RunPod template (in README), client script, README, EXPLANATION entry | done 2026-09-03 |
 | 7 | Pod verification run (owner-executed), measured numbers into README/EXPLANATION, fixes | done 2026-09-03 |
+
+## Issue backlog (GitHub issues #1–#8, opened 2026-10-23)
+
+Source: <https://github.com/ArpitKadam/Tunecast/issues>. All eight are open.
+Task numbers continue from the table above; `#n` always means the GitHub
+issue, never a task. Order is by dependency, reasoning in `DECISIONS.md`
+(2026-10-26). Same gate as before: one task per "Go for Task n".
+
+| # | Issue | Task | Depends on | Status |
+| --- | --- | --- | --- | --- |
+| 8 | [#3](https://github.com/ArpitKadam/Tunecast/issues/3) | PR CI gate (`pytest`, publish gated on it) + Playwright harness and regressions for the existing page | none | todo |
+| 9 | [#4](https://github.com/ArpitKadam/Tunecast/issues/4) | Validate generated WAV; store real `audio_duration_s`, sample rate, channels, bytes | 8 | todo |
+| 10 | [#2](https://github.com/ArpitKadam/Tunecast/issues/2) | Idempotent submissions: client request ID, UNIQUE constraint, body fingerprint, reconcile by ID | 8 | todo |
+| 11 | [#6](https://github.com/ArpitKadam/Tunecast/issues/6) | Bounded queue admission (429/503 + `Retry-After`), queued-job cancel, sequential sweep default | 10 | todo |
+| 12 | [#5](https://github.com/ArpitKadam/Tunecast/issues/5) | Experiment lineage (`parent_job_id`, experiment ID, model revision, config snapshot), honest timings, JSON/CSV export | 9, 10 | todo |
+| 13 | [#1](https://github.com/ArpitKadam/Tunecast/issues/1) | Player and Lab tabs on one shared queue/player state | 9, 10, 11, 12 | todo |
+| 14 | [#7](https://github.com/ArpitKadam/Tunecast/issues/7) | Visible network/auth state: offline/stale indicators, backoff, sign-out, remember-key choice | 13 | todo |
+| 15 | [#8](https://github.com/ArpitKadam/Tunecast/issues/8) | Offline portfolio front door: screenshots, recording, sample, offline demo, README/runbook split | 13, 14 | todo |
+
+### Acceptance criteria
+
+**Task 8 (#3).** `.github/workflows/docker.yml` gains a `pull_request`
+trigger and a test job (`uv sync --frozen --group dev` + `pytest`); the image
+publish job `needs:` it. Playwright suite runs in CI against the stub sidecar
+and covers: draft retention, audio loading, reconnect, lost submit response,
+invalid key, keyboard navigation, mobile layout. Tab-specific cases (both
+tabs, tab-switch playback) land with Task 13. Verify: a PR with a failing test
+blocks publish.
+
+**Task 9 (#4).** Sidecar response is validated as a WAV (header, non-zero
+frames, length matches the data chunk) before a job is `succeeded`. Malformed,
+truncated, empty and timed-out bodies fail the job with a clear error and
+leave no partial file. Columns stored and returned by the API. Tests: malformed
+200 (JSON body), empty body, truncated transfer, timeout, disk-write failure.
+The UI shows actual duration, not the requested ceiling.
+
+**Task 10 (#2).** `POST /jobs` accepts a client request ID persisted with a
+UNIQUE constraint and a body fingerprint. Same ID + same body returns the same
+job; same ID + changed body returns 409. UI and `client/generate.py` reuse the
+ID on retry and, after a lost response, show "Submission status unknown,
+checking" and reconcile by ID. Reproduce the lost-response case in a test
+first.
+
+**Task 11 (#6).** Atomic capacity check at admission (default cap 8 queued
+jobs, env-configurable, `TUNECAST_`-prefixed like the other settings); full queue returns
+429/503 with `Retry-After`; readiness reflects admission. Queued jobs can be
+cancelled; running jobs cannot (sidecar has no cancel) and the UI must not
+pretend otherwise. Seed sweeps default to sequential with an explicit job
+count. Test: concurrent submits past the cap never exceed it.
+
+**Task 12 (#5).** Jobs store `parent_job_id`, experiment ID, real duration,
+model revision and config snapshot. UI shows seed, prompt diff, queue time,
+inference time, real-time factor. Estimator learns from actual output length
+with an uncertainty label; peak GPU memory is sampled during inference, not
+after. JSON/CSV export of an experiment.
+
+**Task 13 (#1).** Player: searchable takes, title/favorite, persistent
+playback, download, generated duration. Lab: lyrics section editor,
+structured style presets, seed lock, duplicate-and-edit, two-take A/B.
+Switching tabs neither interrupts audio nor drops drafts. Stack choice
+(refactor vanilla page vs React + TypeScript + Vite built to static assets)
+is made at the start of the task and recorded in `DECISIONS.md`; either way
+FastAPI, same-origin auth and current routes stay, and the HTML test that
+forbids external assets is updated for local asset links. Adds the two-tab
+Playwright cases deferred from Task 8.
+
+**Task 14 (#7).** Polling and readiness failures are surfaced: offline,
+reconnecting, last-updated, stale indicators; retry backoff; lamps cleared on
+failed checks; explicit sign-out; remember-key is an opt-in choice (default
+session-only).
+
+**Task 15 (#8).** README opens with screenshots, a short two-tab recording, a
+playable sample and an explicitly labelled offline demo using bundled
+fixtures. Long operational commands move to a runbook with links kept. Dated
+benchmarks stay; the one measured run is labelled as one run. No new
+measurements: screenshots and recording come from the stub sidecar, the
+playable sample is the existing `song-client.wav`, and anything not measured
+is not presented as a benchmark.
+
+### Owner rulings (2026-10-26)
+
+- **#7 per-user access and quotas: skipped.** Out of scope (single shared
+  key). Task 14 covers only network/auth state, sign-out and remember-key.
+- **#6 queue limits: approved.** Read as whole-server queue capacity
+  protection, not per-client rate limiting. Default cap 8 queued jobs,
+  configurable by env var.
+- **#8 measurements: no new pod runs.** Task 15 uses existing artifacts and
+  stub-rendered screenshots only; it does not block on a pod session.
