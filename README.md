@@ -109,10 +109,11 @@ clients.
 
 | Method | Path | What |
 | --- | --- | --- |
-| POST | `/jobs` | body `{"lyrics","description","duration_s":180,"seed":null,"format":"wav"}` → 202 with the job |
+| POST | `/jobs` | body `{"lyrics","description","duration_s":180,"seed":null,"format":"wav"}` → 202 with the job. Optional `parent_job_id` (must exist, else 422) and `experiment_id`; a child inherits its parent's experiment, a root starts its own |
 | GET | `/jobs?limit=50` | newest first |
-| GET | `/jobs/{id}` | status, `queue_position` (jobs ahead), `progress` (estimate), `timings`, `gpu`, `error` |
+| GET | `/jobs/{id}` | status, `queue_position` (jobs ahead), `progress` (estimate), `estimate` (`seconds`, `confidence` low\|medium; null once finished), `timings` (`queue_wait_s`, `inference_s`), `real_time_factor`, `gpu` (peak memory per GPU during inference), lineage, `model_revision`, `config_snapshot`, `error` |
 | GET | `/jobs/{id}/audio` | the WAV (409 until succeeded) |
+| GET | `/experiments/{id}/export?format=json\|csv` | every job in the experiment with lineage and measurements, as a download. 404 unknown experiment, 422 bad format |
 | DELETE | `/jobs/{id}` | 204; 409 while running |
 | GET | `/info` | model, revision, sidecar, GPUs, limits |
 

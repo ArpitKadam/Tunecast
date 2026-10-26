@@ -3,6 +3,13 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-10-26 — Task 12: experiment lineage and honest measurements
+
+- **What changed:** Every job records its parent, its experiment, the model revision and a small config snapshot. Real-time factor and peak GPU memory are measured instead of guessed, the progress estimator learns from the actual audio length, and an experiment exports as JSON or CSV. Each take shows seed, queue time, inference time, real-time factor and what changed against its parent; "Refine" starts a child take and "Export experiment" downloads the file.
+- **How it works:** `POST /jobs` accepts optional `parent_job_id` and `experiment_id`; `JobStore.create` resolves the experiment under the store lock. The runner starts a `GpuPeakSampler` thread before inference and stops it in `finally`; the highest per-GPU memory seen is stored. `job_to_dict` adds `real_time_factor` and, for live jobs, `estimate {seconds, confidence}`. The export route flattens an experiment's jobs into 19 fields.
+- **How it was verified:** `uv run pytest -q`: 168 passed, 15 deselected. `uv run pytest -m e2e -q`: 13 passed, 2 xfailed (Task 14's). New `tests/test_experiments.py` covers lineage and validation, idempotency interaction, no secrets in the snapshot, RTF, the estimator, the sampler (fake query, stopped on failure), export JSON and CSV escaping, and old-schema migration with backfill. The e2e test refines a take and downloads the export. Reviewer verdict GREEN; its findings (backfill, blob revoke, visible confidence label, sampler start inside `try`) were fixed.
+- **Limitations / follow-ups:** Peak GPU includes weights and concurrent jobs. Estimator state resets on restart. CSV is not protected against spreadsheet formula injection and has no BOM. Not mutation-tested test by test. Task 13 will replace the page and must keep Refine's behaviour.
+
 ## 2026-10-26 — Task 10: idempotent submissions
 
 - **What changed:** A network blip can no longer queue the same song twice. The page and `client/generate.py` send an `Idempotency-Key` with each submission and reuse it on retry. After a lost response the page says "Submission status unknown, checking…" and looks the job up by key.

@@ -1,5 +1,7 @@
+import json
 import re
 import time
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -257,3 +259,31 @@ def test_mobile_layout_has_no_overflow_and_controls_are_reachable(page: Page, se
         box = control.bounding_box()
         assert 0 <= box["x"] and box["x"] + box["width"] <= 390
         control.hover()
+
+
+def test_refined_take_shows_seed_timings_real_time_factor_and_prompt_diff(page: Page, server):
+    unlocked(page, server)
+    fill_take(page)
+    page.locator("#seed").fill("42")
+    start_take(page)
+    expect(page.locator(".take.succeeded")).to_have_count(1)
+    root = page.locator(".take").first
+    expect(root.locator(".seed")).to_have_text("seed 42")
+    expect(root.locator(".stats")).to_contain_text(re.compile(r"queued \d+\.\ds \S inference \d+\.\ds \S RTF \d+\.\d\dx"))
+    expect(root.locator(".diff")).to_have_text("")
+
+    root.get_by_role("button", name="Refine").click()
+    page.locator("#description").fill("brighter pop, handclaps")
+    start_take(page)
+    expect(page.locator(".take.succeeded")).to_have_count(2)
+    child = page.locator(".take").first
+    expect(child.locator(".diff")).to_have_text("vs parent: description, seed changed")
+    expect(child.locator(".stats")).to_contain_text("RTF")
+
+    with page.expect_download() as download:
+        child.get_by_role("link", name="Export experiment").click()
+    assert re.fullmatch(r"experiment-[\w-]+\.json", download.value.suggested_filename)
+    rows = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
+    assert len(rows) == 2
+    assert rows[1]["parent_job_id"] == rows[0]["job_id"] and rows[1]["experiment_id"] == rows[0]["job_id"]
+

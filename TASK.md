@@ -111,7 +111,7 @@ issue, never a task. Order is by dependency, reasoning in `DECISIONS.md`
 | 9 | [#4](https://github.com/ArpitKadam/Tunecast/issues/4) | Validate generated WAV; store real `audio_duration_s`, sample rate, channels, bytes | 8 | done 2026-10-26 |
 | 10 | [#2](https://github.com/ArpitKadam/Tunecast/issues/2) | Idempotent submissions: client request ID, UNIQUE constraint, body fingerprint, reconcile by ID | 8 | done 2026-10-26 |
 | 11 | [#6](https://github.com/ArpitKadam/Tunecast/issues/6) | Bounded queue admission (429/503 + `Retry-After`), queued-job cancel, sequential sweep default | 10 | todo |
-| 12 | [#5](https://github.com/ArpitKadam/Tunecast/issues/5) | Experiment lineage (`parent_job_id`, experiment ID, model revision, config snapshot), honest timings, JSON/CSV export | 9, 10 | todo |
+| 12 | [#5](https://github.com/ArpitKadam/Tunecast/issues/5) | Experiment lineage (`parent_job_id`, experiment ID, model revision, config snapshot), honest timings, JSON/CSV export | 9, 10 | done 2026-10-26 |
 | 13 | [#1](https://github.com/ArpitKadam/Tunecast/issues/1) | Player and Lab tabs on one shared queue/player state | 9, 10, 11, 12 | todo |
 | 14 | [#7](https://github.com/ArpitKadam/Tunecast/issues/7) | Visible network/auth state: offline/stale indicators, backoff, sign-out, remember-key choice | 13 | todo |
 | 15 | [#8](https://github.com/ArpitKadam/Tunecast/issues/8) | Offline portfolio front door: screenshots, recording, sample, offline demo, README/runbook split | 13, 14 | todo |

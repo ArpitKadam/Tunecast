@@ -101,6 +101,7 @@ def test_submit_returns_202_and_shape(client):
         "id", "status", "queue_position", "created_at", "started_at", "finished_at",
         "params", "progress", "timings", "gpu", "audio_url", "error",
         "audio_duration_s", "audio_sample_rate", "audio_channels", "audio_bytes", "request_id",
+        "estimate", "real_time_factor", "parent_job_id", "experiment_id", "model_revision", "config_snapshot",
     }
     assert job["status"] in ("queued", "running")
     assert job["params"] == {**BODY, "format": "wav"}

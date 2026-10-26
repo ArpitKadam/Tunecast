@@ -125,11 +125,11 @@ def test_prune_keeps_last_n_succeeded_and_deletes_files(store):
 
 def test_estimator_seed_then_median():
     est = Estimator()
-    assert est.seconds_for(100) == pytest.approx(60.0)
+    assert est.estimate(100) == (pytest.approx(60.0), "low")
     est.observe(10, 5.0)   # ratio 0.5
     est.observe(10, 9.0)   # ratio 0.9
     est.observe(10, 7.0)   # ratio 0.7
-    assert est.seconds_for(100) == pytest.approx(70.0)
+    assert est.estimate(100) == (pytest.approx(70.0), "medium")
 
 
 def test_estimator_keeps_only_last_ten():
@@ -138,7 +138,7 @@ def test_estimator_keeps_only_last_ten():
         est.observe(10, 100.0)   # ratio 10
     for _ in range(10):
         est.observe(10, 1.0)     # ratio 0.1
-    assert est.seconds_for(10) == pytest.approx(1.0)
+    assert est.estimate(10)[0] == pytest.approx(1.0)
 
 
 def test_generate_params_derived_values():

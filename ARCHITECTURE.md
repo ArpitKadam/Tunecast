@@ -35,8 +35,8 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | Logging | `tunecast/log.py` | JSON formatter, stdout + file sinks, secret redaction, `log_event` helper |
 | Weights | `tunecast/weights.py`, `tunecast/weights_manifest.json` | Manifest verify, idempotent `snapshot_download`, completion marker |
 | Sidecar | `tunecast/sidecar.py` | `HttpSidecar` (sgl-omni client) and `StubSidecar` (sine WAV) behind one interface; `inspect_wav` validates every response and `generate` returns `AudioInfo` |
-| Jobs | `tunecast/jobs.py` | SQLite `JobStore` (nullable `audio_duration_s`, `audio_sample_rate`, `audio_channels`, `audio_bytes`, `request_id` under a UNIQUE index, `request_hash`; all added in place to older DBs), `JobRunner` worker threads, queue position, progress estimate, prune |
-| GPU info | `tunecast/gpu.py` | `nvidia-smi` query, empty list when absent |
+| Jobs | `tunecast/jobs.py` | SQLite `JobStore` (nullable `audio_duration_s`, `audio_sample_rate`, `audio_channels`, `audio_bytes`, `request_id` under a UNIQUE index, `request_hash`, `parent_job_id`, `experiment_id` (indexed; old rows backfilled to their own id), `model_revision`, `config_snapshot`; all added in place to older DBs), `JobRunner` worker threads, queue position, progress estimate, prune |
+| GPU info | `tunecast/gpu.py` | `nvidia-smi` query, empty list when absent; `GpuPeakSampler` (daemon thread, ~1 s poll, started before `generate`, stopped in `finally`) records peak whole-GPU memory per job |
 | API | `tunecast/app.py` | FastAPI factory, bearer auth, routes, static UI |
 | Tunnel | `tunecast/tunnel.py` | ngrok subprocess, bind check via local API, restart loop |
 | Supervisor | `tunecast/boot.py` | Boot sequence, sidecar process, readiness state, exit codes |
@@ -47,11 +47,11 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 
 ## Data flow: one generation
 
-1. `POST /jobs` → auth → pydantic validation + optional `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, else 422) → fingerprint the body (before the random seed is filled) → fill seed → `JobStore.create` (status `queued`) → `JobRunner.submit(id)` → 202 with job JSON. A key already on a job raises `DuplicateRequest`: same fingerprint → 200 with the existing job, different → 409, nothing enqueued either way. `GET /jobs?request_id=<id>` returns `[job]` or `[]` so a client can reconcile after a lost response.
+1. `POST /jobs` → auth → pydantic validation + optional `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, else 422) → fingerprint the body (before the random seed is filled) → fill seed → optional lineage fields `parent_job_id` / `experiment_id` (fingerprinted only when set, so older retries keep their hashes) → `JobStore.create` (resolves the experiment: root = own id, child inherits; unknown parent → 422, checked after the duplicate-key check) (status `queued`) → `JobRunner.submit(id)` → 202 with job JSON. A key already on a job raises `DuplicateRequest`: same fingerprint → 200 with the existing job, different → 409, nothing enqueued either way. `GET /jobs?request_id=<id>` returns `[job]` or `[]` so a client can reconcile after a lost response.
 2. Worker thread pops the id, `JobStore.update(status="running", started_at=…)`, builds the sidecar payload (`input`, `instructions`, `seed`, `max_new_tokens = duration_s × 25`, `response_format`, `stream=false`), POSTs to `http://127.0.0.1:8000/v1/audio/speech`.
 3. The body must be non-empty and complete (Content-Length enforced); `inspect_wav` checks the RIFF/WAVE header, fmt (PCM, float or EXTENSIBLE) and a data chunk of whole frames that fits in the bytes received. Only then is it written atomically (`.part`, `os.replace`) to `outputs/<id>.wav`. Duration, sample rate, channels and size are stored; `timings`, `gpu` captured; status `succeeded`. Any failure (bad body, truncation, timeout, disk error) → no file left, status `failed`, `error` filled.
-4. `GET /jobs/{id}` returns the row plus computed `queue_position` (jobs ahead: running + queued earlier) and `progress` (estimate, capped 0.95 while running).
-5. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`.
+4. `GET /jobs/{id}` returns the row plus computed `queue_position` (jobs ahead: running + queued earlier) and `progress` (estimate, capped 0.95 while running). Live jobs also carry `estimate {seconds, confidence: low|medium}`; finished jobs carry `real_time_factor` (inference seconds ÷ real audio seconds). The `Estimator` learns from `audio_duration_s`, not the requested ceiling.
+5. `GET /jobs/{id}/audio` streams the file with `Content-Disposition: attachment`. `GET /experiments/{id}/export?format=json|csv` returns the experiment's jobs in the flat `EXPORT_FIELDS` schema (404 unknown experiment, 422 bad format).
 6. Prune deletes the oldest succeeded jobs beyond `TUNECAST_KEEP_LAST`.
 
 ## Key interfaces
