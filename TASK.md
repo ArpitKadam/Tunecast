@@ -107,7 +107,7 @@ issue, never a task. Order is by dependency, reasoning in `DECISIONS.md`
 
 | # | Issue | Task | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| 8 | [#3](https://github.com/ArpitKadam/Tunecast/issues/3) | PR CI gate (`pytest`, publish gated on it) + Playwright harness and regressions for the existing page | none | todo |
+| 8 | [#3](https://github.com/ArpitKadam/Tunecast/issues/3) | PR CI gate (`pytest`, publish gated on it) + Playwright harness and regressions for the existing page | none | done 2026-10-26 (issue #3 stays open until Task 13 adds the tab tests) |
 | 9 | [#4](https://github.com/ArpitKadam/Tunecast/issues/4) | Validate generated WAV; store real `audio_duration_s`, sample rate, channels, bytes | 8 | done 2026-10-26 |
 | 10 | [#2](https://github.com/ArpitKadam/Tunecast/issues/2) | Idempotent submissions: client request ID, UNIQUE constraint, body fingerprint, reconcile by ID | 8 | todo |
 | 11 | [#6](https://github.com/ArpitKadam/Tunecast/issues/6) | Bounded queue admission (429/503 + `Retry-After`), queued-job cancel, sequential sweep default | 10 | todo |

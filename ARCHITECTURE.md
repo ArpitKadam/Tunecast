@@ -113,6 +113,7 @@ Tunecast/
 ├── tunecast/            application package (see Components)
 │   └── static/index.html
 ├── tests/               pytest, stub mode only
+│   └── e2e/             Playwright browser suite (`-m e2e`); `LiveServer` = real app + stub sidecar on a free port
 ├── client/generate.py
 ├── docker/              requirements.txt: additions on top of the base image
 ├── docs/               gitignored: superpowers/{specs,plans}/

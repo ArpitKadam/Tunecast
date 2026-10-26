@@ -3,6 +3,13 @@
 One entry per completed task, newest first. Plain language for a teammate
 reading cold. Why-questions belong in `DECISIONS.md`.
 
+## 2026-10-26 — Task 8: PR CI gate and browser regression tests
+
+- **What changed:** Pull requests now run the unit tests and a Playwright browser suite. The Docker image can only be built after those pass, and pull requests never build or push it.
+- **How it works:** The `test` job runs `uv sync --frozen --group dev`, `pytest`, installs chromium, then `pytest -m e2e`. `build` has `needs: test` and `if: github.event_name != 'pull_request'`. The e2e fixture boots the actual app with the stub sidecar on a free port; chromium drives the real page. Reconnect tests stop and restart the server; the lost-response test aborts the POST after the server accepted it. Three known UI gaps are strict xfails: lost response should say "status unknown" (Task 10), an offline indicator and lamps clearing when the server is unreachable (Task 14).
+- **How it was verified:** `uv run pytest -q` gives 115 passed, 12 deselected. `uv run pytest -m e2e -q` gives 9 passed, 3 xfailed (about 62 s); `--runxfail` showed each xfail failing for its intended reason. `uv lock --check` passes. Reviewer verdict GREEN.
+- **Limitations / follow-ups:** The workflow has not run on GitHub; "a failing PR test blocks publish" is unverified until a PR exists. Tab-specific cases wait for Task 13, so issue #3 stays open until then. No test for drafts across a page reload (the page does not persist them). Worker threads from `JobRunner` are not stopped between e2e tests (daemon threads, harmless at this size).
+
 ## 2026-10-26 — Task 9: validate generated audio, store real duration
 
 - **What changed:** A job is green only if the sidecar returned a complete, playable WAV. The API returns the real duration, sample rate, channel count and byte size, and the UI shows the real length instead of the requested maximum (older rows without it show "up to M:SS").

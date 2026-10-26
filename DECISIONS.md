@@ -3,6 +3,12 @@
 Append-only, newest first. Each entry records what was chosen, what else was
 on the table, and the evidence that settled it.
 
+## 2026-10-26 — Browser regression suite: Playwright for Python, gaps as strict xfail
+- **Decision:** `tests/e2e/` uses pytest-playwright against the real FastAPI app plus `StubSidecar` on a free local port. Tests carry an `e2e` marker, excluded by default with `addopts = -m 'not e2e'`; CI runs them as a separate step. The workflow's `build` job `needs: test` and is skipped on `pull_request`. UI behaviour the issues want but the page lacks is written as `xfail(strict=True)` with a Task reference.
+- **Alternatives considered:** Playwright for Node (second toolchain); mocking the API with `page.route` (tests the mock, not the app); asserting current buggy behaviour as correct; running e2e inside the default `pytest` run.
+- **Why:** Python keeps one toolchain. A real server makes reconnect and lost-response tests genuine; routes are used only to drop a response the server already accepted. Strict xfail turns each known gap into a test that fails the moment it is fixed, forcing removal of the marker. Excluding e2e by default keeps `pytest` fast and browserless.
+- **Consequences:** Tasks 10 and 14 must remove their xfail markers or CI reports XPASS failures. The e2e step adds about 60 s plus chromium install to CI. The CI gate itself is unproven until a real PR runs it. Revisit if selectors in `index.html` change (Task 13).
+
 ## 2026-10-26 — Validate audio in the sidecar client, with a hand-written WAV parser
 - **Decision:** `HttpSidecar` validates the response body in memory with `inspect_wav` (a `struct` parser for PCM, IEEE float and EXTENSIBLE) before the atomic write, and `generate` returns `AudioInfo`. Duration, sample rate, channels and bytes go into four nullable columns, added to old databases with `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`.
 - **Alternatives considered:** validating in `JobRunner` after the file is written; stdlib `wave`; `soundfile`/`mutagen`; a migration framework; storing audio info inside the `timings` JSON; validating the file on disk after writing.
