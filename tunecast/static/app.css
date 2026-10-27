@@ -39,11 +39,18 @@ button, input, textarea, select { font: inherit; color: inherit; }
   background: var(--tally); margin-right: 0.45em; vertical-align: -0.02em;
 }
 .lamp.on::before { background: var(--ready); }
+.lamp.warn::before { background: var(--amber); }
+.lamp.unknown::before { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
+.link { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.6rem; }
+.status .btn { padding: 0.1rem 0.7rem; line-height: 1.5; }
+.status .btn.quiet { padding: calc(0.1rem - 1px) calc(0.7rem - 1px); }
 
 .keybox { margin: 1.5rem; padding: 1rem 1.25rem; background: var(--panel); border-left: 4px solid var(--amber); }
 .keybox p { margin: 0 0 0.6rem; }
 .keybox form { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .keybox input { flex: 1 1 16rem; }
+.keybox .check { flex: 1 1 100%; margin: 0; }
+.keybox .check input { flex: none; }
 
 .tabs { display: flex; gap: 2rem; padding: 0 1.5rem; border-bottom: 1px solid var(--line); }
 .tabs [role=tab] {
@@ -89,6 +96,8 @@ input[type=range] { width: 100%; margin: 0.3rem 0; accent-color: var(--amber); }
 .finder input[type=search] { flex: 0 1 36rem; }
 .finder .check { margin: 0; }
 #reelnote:empty { display: none; }
+.stale-note { margin: 0 0 1rem; padding: 0.4rem 0.75rem; border-left: 4px dashed var(--amber); background: var(--panel); }
+.reel.stale { filter: grayscale(1); }
 .reel { list-style: none; margin: 0; padding: 0; }
 .take {
   display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0 1rem;

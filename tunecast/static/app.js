@@ -84,13 +84,18 @@ const secs = (s) => (s < 60 ? s.toFixed(1) + "s" : fmt(s));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const newRequestId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-// ---- key and requests -----------------------------------------------------------------------------
+// ---- key, connection and requests -----------------------------------------------------------------
 
-const keybox = $("keybox"), main = $("main");
+const keybox = $("keybox"), main = $("main"), signout = $("signout");
+const CFG = { pollMs: 3000, capMs: 30000, offlineAfter: 3, requestMs: 10000, ...window.__tunecast };     // the override is for the browser tests
+let unlocked = false;        // a key was accepted and the takes are being polled
+let ticking = false;
 
-function key() { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } }
-function setKey(v) { try { localStorage.setItem(KEY, v); } catch {} }
-function forgetKey() { try { localStorage.removeItem(KEY); } catch {} }
+// A remembered key lives in localStorage, a session-only one in sessionStorage; either storage may throw.
+const STORES = ["localStorage", "sessionStorage"];
+function key() { for (const s of STORES) try { const v = window[s].getItem(KEY); if (v) return v; } catch {} return ""; }
+function setKey(v, remember) { forgetKey(); try { window[remember ? "localStorage" : "sessionStorage"].setItem(KEY, v); } catch {} }
+function forgetKey() { for (const s of STORES) try { window[s].removeItem(KEY); } catch {} }
 
 async function api(path, opts = {}) {
   const headers = Object.assign({
@@ -98,32 +103,46 @@ async function api(path, opts = {}) {
     "ngrok-skip-browser-warning": "1",
   }, opts.headers || {});
   const r = await fetch(path, Object.assign({}, opts, { headers }));
-  if (r.status === 401) { forgetKey(); showKeybox("That key was refused. Enter the API key set on the pod."); throw new Error("unauthorized"); }
+  if (r.status === 401) { lock("That key was refused. Enter the API key set on the pod."); throw new Error("unauthorized"); }
   return r;
 }
 
 function showKeybox(msg) {
   if (msg) $("keymsg").textContent = msg;
-  keybox.hidden = false; main.hidden = true;
-  clearInterval(pollTimer); pollTimer = null;
+  unlocked = false;
+  keybox.hidden = false; main.hidden = true; signout.hidden = true;
   keybox.querySelector("input").focus();
 }
 
+// Forgets the key and everything loaded with it. The draft in the Lab stays: it is the user's text, not server data.
+function lock(msg) {
+  forgetKey();
+  link.okAt = 0; generation++; pending = null; parentId = null; cueing = null;
+  for (const id of [...loads.keys()]) forget(id);
+  ab.a = ab.b = null;
+  setJobs([]);
+  $("gpus").textContent = ""; reelnote.textContent = "";
+  showKeybox(msg);
+}
+
 async function unlock() {
-  const r = await api("/info");
+  const r = await api("/info", { signal: AbortSignal.timeout(CFG.requestMs) });
   if (!r.ok) throw new Error("info " + r.status);
   renderInfo(await r.json());
-  keybox.hidden = true; main.hidden = false;
+  unlocked = true;
+  keybox.hidden = true; main.hidden = false; signout.hidden = false;
   await poll();
-  pollTimer = setInterval(poll, 3000);
 }
 
 $("keyform").addEventListener("submit", async (e) => {
   e.preventDefault();
-  setKey(new FormData(e.target).get("key").trim());
+  const data = new FormData(e.target);
+  setKey(data.get("key").trim(), data.has("remember"));
   e.target.reset();
-  try { await unlock(); } catch {}
+  try { await unlock(); }
+  catch (err) { if (err.message !== "unauthorized") $("keymsg").textContent = "Could not reach the server. Retrying…"; }
 });
+signout.addEventListener("click", () => lock("Signed out. Enter the API key to continue."));
 
 function renderInfo(info) {
   $("gpus").textContent = (info.gpus || []).map((g) =>
@@ -131,21 +150,76 @@ function renderInfo(info) {
     || (info.stub ? "stub mode" : "");
 }
 
+// online -> reconnecting (a poll or readiness check failed) -> offline (CFG.offlineAfter failures in a row) -> online on success.
+// Failures also back the polling off, 3 s -> 6 -> 12 -> 24 s, then capped at 30 s, and mark the takes list stale.
+const link = { state: "online", fails: 0, okAt: 0 };
+const linkEl = $("link-state"), retry = $("retry");
+
+function note(ok) {
+  link.fails = ok ? 0 : link.fails + 1;
+  link.state = !link.fails ? "online" : link.fails < CFG.offlineAfter ? "reconnecting" : "offline";
+  if (!ok) setLamps();
+  if (linkEl.textContent !== link.state) linkEl.textContent = link.state;     // it sits in an aria-live region: do not re-announce every poll
+  linkEl.classList.toggle("on", link.state === "online");
+  linkEl.classList.toggle("warn", link.state === "reconnecting");
+  retry.hidden = link.state === "online";
+  const stale = unlocked && link.state !== "online";
+  $("reel").classList.toggle("stale", stale);
+  $("stale").hidden = !stale;
+  renderAge();
+}
+
+function renderAge() {
+  const s = Math.max(0, Math.round((Date.now() - link.okAt) / 1000));
+  $("link-age").textContent = unlocked && link.okAt ? `updated ${s < 60 ? s + "s" : Math.floor(s / 60) + "m"} ago` : "";
+}
+
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    if (unlocked) await poll();
+    else if (key()) await unlock();
+    else note(await ready());
+  } catch (err) { if (err.message !== "unauthorized") note(false); }
+  finally {
+    ticking = false;
+    pollTimer = setTimeout(tick, Math.min(CFG.pollMs * 2 ** link.fails, CFG.capMs));
+  }
+}
+
+retry.addEventListener("click", () => { clearTimeout(pollTimer); tick(); });
+
+function setLamps(model, tunnel) {
+  for (const [id, on] of [["lamp-model", model], ["lamp-tunnel", tunnel]]) {
+    const lamp = $(id);
+    lamp.classList.toggle("on", on === true);
+    lamp.classList.toggle("unknown", on === undefined);
+    lamp.title = on === undefined ? "unknown: server unreachable" : on ? "ready" : "not ready";
+  }
+}
+
+// /ready answers 503 with a JSON body while something is not up yet; that is a reachable server, not a failure.
 async function ready() {
   try {
-    const r = await fetch("/ready", { headers: { "ngrok-skip-browser-warning": "1" } });
+    const r = await fetch("/ready", { headers: { "ngrok-skip-browser-warning": "1" }, signal: AbortSignal.timeout(CFG.requestMs) });
+    if (r.status !== 200 && r.status !== 503) return false;
     const j = await r.json();
-    $("lamp-model").classList.toggle("on", !!j.model);
-    $("lamp-tunnel").classList.toggle("on", !!j.tunnel);
-  } catch {}
+    setLamps(!!j.model, !!j.tunnel);
+    return true;
+  } catch { return false; }
 }
 
 async function poll() {
   const gen = generation;
   let list;
-  try { const r = await api("/jobs?limit=50"); if (!r.ok) return; list = await r.json(); } catch { return; }
-  if (gen === generation) setJobs(list);
-  ready();
+  try {
+    const r = await api("/jobs?limit=50", { signal: AbortSignal.timeout(CFG.requestMs) });
+    if (!r.ok) return note(false);
+    list = await r.json();
+  } catch (err) { if (err.message !== "unauthorized") note(false); return; }
+  if (gen === generation) { setJobs(list); link.okAt = Date.now(); }
+  note(await ready());
 }
 
 function setJobs(list) {
@@ -408,7 +482,7 @@ async function cue(id, keep = false) {
   try { url = await audioUrl(id); }
   catch (err) {
     if (cueing === id) { cueing = null; renderTransport(); }
-    if (err.message !== "unauthorized") reelnote.textContent = "Could not load that take's audio. Try again.";
+    if (err.message !== "unauthorized" && err.message !== "gone") reelnote.textContent = "Could not load that take's audio. Try again.";
     return;
   }
   if (cueing !== id) return;
@@ -703,5 +777,6 @@ form.addEventListener("submit", async (e) => {
 showLyrics();
 syncChips();
 renderTransport();
-ready(); setInterval(ready, 10000);
-if (key()) unlock().catch(() => {}); else showKeybox();
+setInterval(renderAge, 1000);
+if (!key()) showKeybox();
+tick();

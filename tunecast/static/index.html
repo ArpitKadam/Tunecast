@@ -13,17 +13,24 @@
   <h1>Tunecast</h1>
   <span class="powered">Powered by <strong>MiniMax-Music3</strong></span>
   <span class="status">
-    <span id="lamp-model" class="lamp">model</span>
-    <span id="lamp-tunnel" class="lamp">tunnel</span>
+    <span id="lamp-model" class="lamp unknown" title="unknown: server unreachable">model</span>
+    <span id="lamp-tunnel" class="lamp unknown" title="unknown: server unreachable">tunnel</span>
     <span id="gpus"></span>
+    <span class="link">
+      <span id="link-state" class="lamp on" role="status" aria-live="polite">online</span>
+      <span id="link-age"></span>
+      <button type="button" id="retry" class="btn quiet" hidden>Retry now</button>
+    </span>
+    <button type="button" id="signout" class="btn quiet" hidden>Sign out</button>
   </span>
 </header>
 
 <section id="keybox" class="keybox" hidden>
-  <p id="keymsg">This server needs the shared API key. It is stored only in this browser.</p>
+  <p id="keymsg">This server needs the shared API key. It stays in this browser only.</p>
   <form id="keyform">
     <input type="password" name="key" autocomplete="off" placeholder="API key" aria-label="API key" required>
     <button class="btn" type="submit">Use key</button>
+    <label class="check"><input type="checkbox" name="remember"> Remember on this device <span class="hint">otherwise the key is forgotten when this tab closes</span></label>
   </form>
 </section>
 
@@ -41,6 +48,7 @@
       <span class="hint">Search covers the newest 50 takes.</span>
     </div>
     <p id="reelnote" class="note" role="status"></p>
+    <p id="stale" class="stale-note" hidden>Stale: these takes may be out of date until the connection returns.</p>
     <ol id="reel" class="reel"></ol>
     <div id="empty" class="empty">
       <p>No takes yet. Write one in the Lab. Length is a ceiling: the model ends the song when the lyrics run out.</p>

@@ -86,6 +86,107 @@ def test_key_revoked_mid_session_returns_to_keybox_and_keeps_draft(page: Page, s
     expect(page.locator("#description")).to_have_value(STYLE)
 
 
+def test_revoked_key_also_ejects_playing_audio_and_forgets_the_takes(page: Page, server):
+    server.submit(duration_s=30)
+    unlocked(page, server)
+    page.locator(".take").first.get_by_role("button", name="Play").click()
+    wait_playing(page, after=0.2)
+    page.evaluate("localStorage.setItem('tunecast_key', 'rotated')")
+    expect(page.locator("#keybox")).to_be_visible(timeout=10_000)
+    expect(page.locator("#keymsg")).to_contain_text("refused")
+    expect(page.locator("#audio")).not_to_have_attribute("src", re.compile("."))
+    assert page.evaluate("document.querySelector('#audio').paused")
+    expect(page.locator(".take")).to_have_count(0)
+
+
+def stored(page: Page) -> dict:
+    return page.evaluate("({local: localStorage.getItem('tunecast_key'), session: sessionStorage.getItem('tunecast_key')})")
+
+
+def test_key_is_session_only_unless_remembered(page: Page, server):
+    page.goto(server.url)
+    expect(page.get_by_label("Remember on this device")).not_to_be_checked()
+    enter_key(page, KEY)
+    expect(page.locator("#main")).to_be_visible()
+    assert stored(page) == {"local": None, "session": KEY}
+    page.reload()
+    expect(page.locator("#main")).to_be_visible()
+
+    page.get_by_role("button", name="Sign out").click()
+    page.get_by_label("Remember on this device").check()
+    enter_key(page, KEY)
+    expect(page.locator("#main")).to_be_visible()
+    assert stored(page) == {"local": KEY, "session": None}
+    page.reload()
+    expect(page.locator("#main")).to_be_visible()
+
+
+def test_key_entered_while_the_server_is_unreachable_unlocks_when_it_returns(page: Page, server):
+    fast_polling(page)
+    page.goto(server.url)
+    expect(page.locator("#keybox")).to_be_visible()
+    server.stop()
+    enter_key(page, KEY)
+    expect(page.locator("#keymsg")).to_contain_text("Could not reach the server")
+    expect(page.locator("#main")).to_be_hidden()
+    server.start()
+    expect(page.locator("#main")).to_be_visible(timeout=15_000)
+    expect(page.locator("#link-state")).to_have_text("online")
+
+
+def test_key_remembered_by_an_earlier_version_still_unlocks_and_sign_out_removes_it_everywhere(page: Page, server):
+    page.goto(server.url)
+    page.evaluate(f"localStorage.setItem('tunecast_key', '{KEY}'); sessionStorage.setItem('tunecast_key', '{KEY}')")
+    page.reload()
+    expect(page.locator("#main")).to_be_visible()
+    page.get_by_role("button", name="Sign out").click()
+    assert stored(page) == {"local": None, "session": None}
+    page.reload()
+    expect(page.locator("#keybox")).to_be_visible()
+
+
+def test_sign_out_stops_polling_ejects_audio_and_forgets_the_takes(page: Page, server):
+    first = server.submit(duration_s=30)
+    second = server.submit(duration_s=1)
+    fast_polling(page)
+    jobs: list[str] = []
+    page.on("request", lambda r: "/jobs" in r.url and jobs.append(r.url))
+    unlocked(page, server)
+    expect(page.locator(".take.succeeded")).to_have_count(2, timeout=10_000)
+    expect(page.get_by_role("button", name="Sign out")).to_be_visible()
+    page.locator(".take").nth(1).get_by_role("button", name="Play").click()
+    wait_playing(page, after=0.2)
+    page.locator(".take").first.get_by_role("button", name="Edit a copy").click()
+    expect(page.locator("#lineage")).to_be_visible()
+    page.locator("#ab-a").select_option(first["id"])
+    page.locator("#ab-b").select_option(second["id"])
+    expect(page.locator("#ab")).to_be_visible()
+    fill_take(page)
+
+    page.get_by_role("button", name="Sign out").click()
+    expect(page.locator("#keybox")).to_be_visible()
+    expect(page.locator("#keymsg")).to_contain_text("Signed out")
+    expect(page.locator("#main")).to_be_hidden()
+    expect(page.get_by_role("button", name="Sign out")).to_be_hidden()
+    expect(page.get_by_placeholder("API key")).to_be_focused()
+    expect(page.locator("#audio")).not_to_have_attribute("src", re.compile("."))
+    assert page.evaluate("document.querySelector('#audio').paused")
+    expect(page.locator("#now-title")).to_have_text("Nothing playing")
+    expect(page.locator(".take")).to_have_count(0)
+    expect(page.locator("#gpus")).to_have_text("")
+    assert page.evaluate("[document.querySelector('#lineage').hidden, document.querySelector('#ab').hidden]") == [True, True]
+    assert stored(page) == {"local": None, "session": None}
+
+    seen = len(jobs)
+    page.wait_for_timeout(1_500)
+    assert jobs[seen:] == [], "polling continued after sign-out"
+    expect(page.locator("#lyrics")).to_have_value(LYRICS)      # the draft is the user's text and stays
+
+    enter_key(page, KEY)
+    expect(page.locator("#main")).to_be_visible()
+    expect(page.locator(".take")).to_have_count(2)
+
+
 def test_draft_survives_submit_and_polling(page: Page, server):
     unlocked(page, server)
     fill_take(page)
@@ -132,20 +233,118 @@ def test_reconnect_resumes_polling_without_reload(page: Page, server):
     expect(page.locator(".take .state")).to_have_text(STATES)
 
 
-@pytest.mark.xfail(strict=True, reason="Task 14: no offline or reconnecting indicator while polling fails")
 def test_offline_state_is_shown_while_server_is_unreachable(page: Page, server):
     unlocked(page, server)
     server.stop()
     expect(page.get_by_text(re.compile(r"offline|reconnecting", re.I))).to_be_visible(timeout=8_000)
 
 
-@pytest.mark.xfail(strict=True, reason="Task 14: readiness lamps keep their last state when the check fails")
 def test_lamps_clear_when_server_is_unreachable(page: Page, server):
     server.state.model = server.state.tunnel = True
     unlocked(page, server)
     expect(page.locator("#lamp-model")).to_have_class(LAMP_ON)
     server.stop()
     expect(page.locator("#lamp-model")).not_to_have_class(LAMP_ON, timeout=13_000)
+    expect(page.locator("#lamp-model")).to_have_attribute("title", "unknown: server unreachable")
+    expect(page.locator("#lamp-tunnel")).to_have_attribute("title", "unknown: server unreachable")
+
+
+def fast_polling(page: Page) -> None:
+    """Poll every 300 ms and back off to at most 1.5 s, so outages play out in seconds."""
+    page.add_init_script("window.__tunecast = {pollMs: 300, capMs: 1500}")
+
+
+def record_link_states(page: Page) -> None:
+    page.evaluate("""() => {
+        const el = document.querySelector('#link-state');
+        window.__linkStates = [el.textContent];
+        new MutationObserver(() => {
+            if (window.__linkStates.at(-1) !== el.textContent) window.__linkStates.push(el.textContent);
+        }).observe(el, {childList: true, characterData: true, subtree: true});
+    }""")
+
+
+AGE = re.compile(r"^updated \d+s ago$")
+
+
+def test_link_goes_reconnecting_then_offline_then_online_and_marks_the_list_stale(page: Page, server):
+    server.submit()
+    fast_polling(page)
+    unlocked(page, server)
+    state, reel, stale = page.locator("#link-state"), page.locator("#reel"), page.locator("#stale")
+    expect(page.locator(".take.succeeded")).to_have_count(1)
+    expect(state).to_have_text("online")
+    expect(page.locator("#link-age")).to_have_text(AGE)
+    expect(page.get_by_role("button", name="Retry now")).to_be_hidden()
+    expect(stale).to_be_hidden()
+    expect(reel).not_to_have_class(re.compile("stale"))
+    record_link_states(page)
+
+    server.stop()
+    expect(state).to_have_text("offline", timeout=15_000)
+    expect(stale).to_be_visible()
+    expect(stale).to_contain_text("Stale")
+    expect(reel).to_have_class(re.compile("stale"))
+    expect(page.locator(".take")).to_have_count(1)
+    expect(page.get_by_role("button", name="Retry now")).to_be_visible()
+    expect(page.locator("#link-age")).to_have_text(AGE)
+    first = page.locator("#link-age").inner_text()
+    page.wait_for_function("t => document.querySelector('#link-age').textContent !== t", arg=first, timeout=5_000)     # the label ticks
+
+    server.start()
+    expect(state).to_have_text("online", timeout=15_000)
+    expect(stale).to_be_hidden()
+    expect(reel).not_to_have_class(re.compile("stale"))
+    expect(page.get_by_role("button", name="Retry now")).to_be_hidden()
+    assert page.evaluate("window.__linkStates") == ["online", "reconnecting", "offline", "online"]
+
+
+def test_polling_backs_off_while_unreachable_and_resets_after_recovery(page: Page, server):
+    page.add_init_script("window.__tunecast = {pollMs: 200, capMs: 1600}")
+    polls: list[float] = []
+    page.on("request", lambda r: "/jobs?limit=50" in r.url and polls.append(time.monotonic()))
+    unlocked(page, server)
+    expect(page.locator("#link-state")).to_have_text("online")
+    server.stop()
+    mark = len(polls)
+    page.wait_for_timeout(7_000)
+    down = polls[mark:]
+    gaps = [b - a for a, b in zip(down, down[1:])]
+    assert len(down) <= 10, f"{len(down)} polls in 7 s with the server down: no backoff"
+    assert max(gaps) >= 1.4, f"gaps never grew: {gaps}"
+
+    server.start()
+    expect(page.locator("#link-state")).to_have_text("online", timeout=10_000)
+    mark = len(polls)
+    page.wait_for_timeout(2_000)
+    up = polls[mark:]
+    assert len(up) >= 4 and max(b - a for a, b in zip(up, up[1:])) < 0.8, "interval did not reset after recovery"
+
+
+def test_retry_now_polls_without_waiting_for_the_backoff(page: Page, server):
+    page.add_init_script("window.__tunecast = {pollMs: 5000, capMs: 30000, offlineAfter: 1}")
+    unlocked(page, server)
+    server.stop()
+    expect(page.locator("#link-state")).to_have_text("offline", timeout=15_000)      # the next scheduled poll is 10 s after that failure
+    server.start()
+    clicked = time.monotonic()
+    page.get_by_role("button", name="Retry now").click()
+    expect(page.locator("#link-state")).to_have_text("online", timeout=3_000)
+    assert time.monotonic() - clicked < 3, "Retry now waited for the backoff"
+
+
+def test_playback_keeps_running_while_the_server_is_unreachable(page: Page, server):
+    server.submit(duration_s=30)
+    fast_polling(page)
+    unlocked(page, server)
+    page.locator(".take").first.get_by_role("button", name="Play").click()
+    wait_playing(page, after=0.3)
+    server.stop()
+    expect(page.locator("#link-state")).to_have_text("offline", timeout=15_000)
+    heard = playback(page)["t"]
+    wait_playing(page, after=heard + 0.5)
+    assert page.evaluate("document.querySelector('#audio').src").startswith("blob:")
+    expect(page.locator("#now-title")).to_have_text("Take 1")
 
 
 def lose_submit_response(page: Page) -> None:
@@ -236,6 +435,9 @@ def test_keyboard_tab_order_and_visible_focus(page: Page, server):
     page.reload()
     expect(page.locator("#main")).to_be_visible()
     page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Sign out")).to_be_focused()      # the masthead comes first
+    assert ring(page) == ["solid", "2px"]
+    page.keyboard.press("Tab")
     expect(page.get_by_role("tab", name="Player")).to_be_focused()
     page.keyboard.press("ArrowRight")
     expect(page.get_by_role("tab", name="Lab")).to_be_focused()
@@ -297,6 +499,20 @@ def test_mobile_layout_has_no_overflow_and_controls_are_reachable(page: Page, se
         box = control.bounding_box()
         assert 0 <= box["x"] and box["x"] + box["width"] <= 390
         control.hover()
+
+
+def test_mobile_offline_indicator_and_sign_out_do_not_overflow(page: Page, server):
+    page.set_viewport_size({"width": 390, "height": 844})
+    fast_polling(page)
+    unlocked(page, server)
+    server.stop()
+    expect(page.locator("#link-state")).to_have_text("offline", timeout=15_000)
+    for control in (page.get_by_role("button", name="Retry now"), page.get_by_role("button", name="Sign out"), page.locator("#link-age")):
+        box = control.bounding_box()
+        assert 0 <= box["x"] and box["x"] + box["width"] <= 390
+    assert horizontal_overflow(page) <= 0
+    open_tab(page, "Lab")
+    assert horizontal_overflow(page) <= 0
 
 
 def test_refined_take_shows_seed_timings_real_time_factor_and_prompt_diff(page: Page, server):
@@ -364,6 +580,9 @@ def test_tabs_render_and_are_reachable_by_keyboard(page: Page, server):
     expect(page.get_by_role("tab")).to_have_count(2)
     expect(player).to_have_attribute("aria-controls", "panel-player")
     expect(lab).to_have_attribute("aria-controls", "panel-lab")
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("button", name="Sign out")).to_be_focused()      # the masthead comes first
+    assert ring(page) == ["solid", "2px"]
     page.keyboard.press("Tab")
     expect(player).to_be_focused()
     assert ring(page) == ["solid", "2px"]
@@ -605,8 +824,11 @@ def test_playing_take_that_leaves_the_list_plays_on_until_it_ends(page: Page, se
     gone = playback(page)["take"]
 
     def without_playing(route):
-        response = route.fetch()
-        route.fulfill(response=response, json=[j for j in response.json() if j["id"] != gone])
+        try:
+            response = route.fetch()
+            route.fulfill(response=response, json=[j for j in response.json() if j["id"] != gone])
+        except Error:      # the server may already be stopping when the test ends
+            route.abort()
 
     page.route(re.compile(r"/jobs\?limit=50"), without_playing)
     expect(page.locator(".take")).to_have_count(1, timeout=10_000)
@@ -617,6 +839,7 @@ def test_playing_take_that_leaves_the_list_plays_on_until_it_ends(page: Page, se
 
     expect(audio).not_to_have_attribute("src", re.compile("."), timeout=10_000)      # forgotten once it ends
     expect(page.locator("#now-title")).to_have_text("Nothing playing")
+    page.unroute_all(behavior="ignoreErrors")
 
 
 def test_ab_flip_keeps_the_playback_position(page: Page, server):
