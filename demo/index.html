@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tunecast offline demo</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="demo.css">
+<script src="shim.js"></script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="demo-banner" role="note"><strong>OFFLINE DEMO</strong> &mdash; recorded fixtures, no GPU, nothing is generated <span>The take is the real output of the 2026-09-03 pod run; the page is the real UI.</span></div>
+
+<header class="masthead">
+  <h1>Tunecast</h1>
+  <span class="powered">Powered by <strong>MiniMax-Music3</strong></span>
+  <span class="status">
+    <span id="lamp-model" class="lamp unknown" title="unknown: server unreachable">model</span>
+    <span id="lamp-tunnel" class="lamp unknown" title="unknown: server unreachable">tunnel</span>
+    <span id="gpus"></span>
+    <span class="link">
+      <span id="link-state" class="lamp on" role="status" aria-live="polite">online</span>
+      <span id="link-age"></span>
+      <button type="button" id="retry" class="btn quiet" hidden>Retry now</button>
+    </span>
+    <button type="button" id="signout" class="btn quiet" hidden>Sign out</button>
+  </span>
+</header>
+
+<section id="keybox" class="keybox" hidden>
+  <p id="keymsg">This server needs the shared API key. It stays in this browser only.</p>
+  <form id="keyform">
+    <input type="password" name="key" autocomplete="off" placeholder="API key" aria-label="API key" required>
+    <button class="btn" type="submit">Use key</button>
+    <label class="check"><input type="checkbox" name="remember"> Remember on this device <span class="hint">otherwise the key is forgotten when this tab closes</span></label>
+  </form>
+</section>
+
+<main id="main" hidden>
+  <div class="tabs" role="tablist" aria-label="Tunecast views">
+    <button type="button" role="tab" id="tab-player" aria-controls="panel-player" aria-selected="true">Player</button>
+    <button type="button" role="tab" id="tab-lab" aria-controls="panel-lab" aria-selected="false" tabindex="-1">Lab</button>
+  </div>
+
+  <section id="panel-player" class="panel player" role="tabpanel" aria-labelledby="tab-player">
+    <div class="finder">
+      <input type="search" id="search" aria-label="Search takes" placeholder="Title, style, lyrics, seed, status" autocomplete="off">
+      <label class="check"><input type="checkbox" id="favonly"> Favorites only</label>
+      <span id="count" class="note"></span>
+      <span class="hint">Search covers the newest 50 takes.</span>
+    </div>
+    <p id="reelnote" class="note" role="status"></p>
+    <p id="stale" class="stale-note" hidden>Stale: these takes may be out of date until the connection returns.</p>
+    <ol id="reel" class="reel"></ol>
+    <div id="empty" class="empty">
+      <p>No takes yet. Write one in the Lab. Length is a ceiling: the model ends the song when the lyrics run out.</p>
+      <button type="button" class="btn quiet" id="to-lab">Open the Lab</button>
+    </div>
+    <p id="nomatch" class="empty" hidden>No takes match. Clear the search or the favorites filter.</p>
+  </section>
+
+  <section id="panel-lab" class="panel lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+    <form id="takeform" class="sheet">
+      <div class="col">
+        <div id="lineage" class="lineage" hidden>
+          <p id="lineage-text"></p>
+          <button type="button" class="btn quiet" id="detach">Detach</button>
+        </div>
+
+        <fieldset class="lyrics">
+          <legend>Lyrics</legend>
+          <div class="seg" role="radiogroup" aria-label="Edit lyrics as">
+            <label><input type="radio" name="lyricsview" value="sections" checked><span>Sections</span></label>
+            <label><input type="radio" name="lyricsview" value="text"><span>Text</span></label>
+          </div>
+
+          <div id="sheet">
+            <ol id="sections" class="sections"></ol>
+            <p id="sheet-empty" class="note">Add the first section, or switch to Text to paste whole lyrics.</p>
+            <div class="chips adder" role="toolbar" aria-label="Add section">
+              <span class="chips-label" aria-hidden="true">Add</span>
+              <button type="button" class="chip" data-tag="Intro">Intro</button>
+              <button type="button" class="chip" data-tag="Verse">Verse</button>
+              <button type="button" class="chip" data-tag="Pre-Chorus">Pre-Chorus</button>
+              <button type="button" class="chip" data-tag="Chorus">Chorus</button>
+              <button type="button" class="chip" data-tag="Bridge">Bridge</button>
+              <button type="button" class="chip" data-tag="Outro">Outro</button>
+            </div>
+          </div>
+
+          <textarea id="lyrics" name="lyrics" maxlength="20000" aria-label="Lyrics as text" hidden placeholder="[Verse]
+Morning light filtering through the pine
+[Chorus]
+Softly the world begins to breathe"></textarea>
+          <p class="hint">Section tags such as [Verse] and [Chorus] sit on their own lines.</p>
+        </fieldset>
+      </div>
+
+      <div class="col">
+        <fieldset class="style">
+          <legend>Style</legend>
+          <div id="presets"></div>
+          <label for="description">Style text <span class="hint">sent as written; presets add or remove their words</span></label>
+          <textarea id="description" name="description" required maxlength="10000" placeholder="A warm acoustic pop song with intimate female vocals, fingerpicked guitar, soft piano, and a gradual build into a wide final chorus."></textarea>
+        </fieldset>
+
+        <div class="row">
+          <div>
+            <label for="duration">Maximum length <span class="hint" id="durlabel">3:00</span></label>
+            <input type="range" id="duration" name="duration_s" min="1" max="360" value="180" aria-describedby="durlabel">
+          </div>
+          <div>
+            <label for="seed">Seed <span class="hint">blank picks one</span></label>
+            <input type="number" id="seed" name="seed" min="0" max="2147483647" step="1" placeholder="random">
+            <label class="check"><input type="checkbox" id="seedlock"> Lock seed <span class="hint">reuse it for the next takes</span></label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" type="submit" id="submit">Start take</button>
+          <span class="note" id="formnote" role="status" aria-live="polite"></span>
+        </div>
+
+        <section class="compare" aria-labelledby="compare-h">
+          <h2 id="compare-h">Compare two takes</h2>
+          <div class="row">
+            <div><label for="ab-a">A</label><select id="ab-a"><option value="">Choose a take</option></select></div>
+            <div><label for="ab-b">B</label><select id="ab-b"><option value="">Choose a take</option></select></div>
+          </div>
+          <p class="note">Flip between A and B in the player bar. Playback keeps its position.</p>
+        </section>
+      </div>
+    </form>
+  </section>
+</main>
+
+<footer class="dock" aria-label="Now playing">
+  <div class="transport">
+    <button type="button" id="playpause" class="pp" aria-label="Play" disabled></button>
+    <div class="now">
+      <span id="now-title">Nothing playing</span>
+      <span id="now-meta" class="note">Pick a take in the Player.</span>
+    </div>
+    <span id="ab" class="ab" role="group" aria-label="A/B" hidden>
+      <button type="button" id="flip-a" aria-label="Switch to A" aria-pressed="false">A</button>
+      <button type="button" id="flip-b" aria-label="Switch to B" aria-pressed="false">B</button>
+    </span>
+    <input type="range" id="scrub" class="scrub" min="0" max="0" step="0.1" value="0" aria-label="Position" disabled>
+    <span id="clock" class="clock">0:00 / 0:00</span>
+  </div>
+  <audio id="audio" preload="auto"></audio>
+  <p class="tally">Outputs are deleted when this pod terminates. Save what you want to keep.<span class="more"> Every play or save crosses the ngrok tunnel and counts toward its monthly 1 GB.</span></p>
+</footer>
+
+<template id="take-row">
+  <li class="take">
+    <div class="num">take<b></b></div>
+    <div class="body">
+      <div class="head">
+        <button type="button" class="fav" aria-label="Favorite" aria-pressed="false"></button>
+        <input type="text" class="title" aria-label="Title" maxlength="120" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="facts"><span class="state"></span><span class="meta len"></span><span class="meta seed"></span><span class="meta when"></span></div>
+      <div class="desc"></div>
+      <div class="meter" aria-hidden="true"></div>
+      <div class="note prog"></div>
+      <div class="note stats"></div>
+      <div class="note diff"></div>
+      <div class="err error" hidden></div>
+      <div class="tools">
+        <button type="button" class="btn quiet play">Play</button>
+        <a class="btn quiet save" href="#">Save WAV</a>
+        <button type="button" class="btn quiet copy">Edit a copy</button>
+        <a class="btn quiet exp" href="#">Export experiment</a>
+        <button type="button" class="btn quiet danger del">Delete</button>
+      </div>
+    </div>
+  </li>
+</template>
+
+<template id="section-card">
+  <li class="section">
+    <div class="section-head">
+      <input type="text" class="tag" list="tags" maxlength="40" placeholder="untagged" autocomplete="off" spellcheck="false">
+      <span class="moves">
+        <button type="button" class="icon up">&uarr;</button>
+        <button type="button" class="icon down">&darr;</button>
+        <button type="button" class="icon remove">&times;</button>
+      </span>
+    </div>
+    <textarea class="lines" rows="3" spellcheck="false"></textarea>
+  </li>
+</template>
+
+<datalist id="tags">
+  <option value="Intro"><option value="Verse"><option value="Pre-Chorus"><option value="Chorus">
+  <option value="Bridge"><option value="Hook"><option value="Interlude"><option value="Outro">
+</datalist>
+
+</body>
+</html>

@@ -100,21 +100,23 @@ These override the clauses above. Reasoning in `DECISIONS.md`; full design in
 
 ## Issue backlog (GitHub issues #1–#8, opened 2026-10-23)
 
-Source: <https://github.com/ArpitKadam/Tunecast/issues>. All eight are open.
+Status 2026-10-27: tasks 8–15 done and committed locally; all eight issues closed. Commits after `e83d708` (tasks 10–15) are not pushed yet.
+
+Source: <https://github.com/ArpitKadam/Tunecast/issues>. All eight are closed.
 Task numbers continue from the table above; `#n` always means the GitHub
 issue, never a task. Order is by dependency, reasoning in `DECISIONS.md`
 (2026-10-26). Same gate as before: one task per "Go for Task n".
 
 | # | Issue | Task | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| 8 | [#3](https://github.com/ArpitKadam/Tunecast/issues/3) | PR CI gate (`pytest`, publish gated on it) + Playwright harness and regressions for the existing page | none | done 2026-10-26 (issue #3 stays open until Task 13 adds the tab tests) |
-| 9 | [#4](https://github.com/ArpitKadam/Tunecast/issues/4) | Validate generated WAV; store real `audio_duration_s`, sample rate, channels, bytes | 8 | done 2026-10-26 |
-| 10 | [#2](https://github.com/ArpitKadam/Tunecast/issues/2) | Idempotent submissions: client request ID, UNIQUE constraint, body fingerprint, reconcile by ID | 8 | done 2026-10-26 |
-| 11 | [#6](https://github.com/ArpitKadam/Tunecast/issues/6) | Bounded queue admission (429/503 + `Retry-After`), queued-job cancel, sequential sweep default | 10 | done 2026-10-26 (no sweep feature exists; the rule for one is in `DECISIONS.md`) |
-| 12 | [#5](https://github.com/ArpitKadam/Tunecast/issues/5) | Experiment lineage (`parent_job_id`, experiment ID, model revision, config snapshot), honest timings, JSON/CSV export | 9, 10 | done 2026-10-26 |
-| 13 | [#1](https://github.com/ArpitKadam/Tunecast/issues/1) | Player and Lab tabs on one shared queue/player state | 9, 10, 11, 12 | done 2026-10-27 |
-| 14 | [#7](https://github.com/ArpitKadam/Tunecast/issues/7) | Visible network/auth state: offline/stale indicators, backoff, sign-out, remember-key choice | 13 | done 2026-10-27 |
-| 15 | [#8](https://github.com/ArpitKadam/Tunecast/issues/8) | Offline portfolio front door: screenshots, recording, sample, offline demo, README/runbook split | 13, 14 | todo |
+| 8 | [#3](https://github.com/ArpitKadam/Tunecast/issues/3) | PR CI gate (`pytest`, publish gated on it) + Playwright harness and regressions for the existing page | none | done 2026-10-26 (`570a088`); tab cases added in Task 13, issue #3 closed 2026-10-27. CI gate unproven on GitHub until a PR runs it |
+| 9 | [#4](https://github.com/ArpitKadam/Tunecast/issues/4) | Validate generated WAV; store real `audio_duration_s`, sample rate, channels, bytes | 8 | done 2026-10-26 (`ccdc61b`) |
+| 10 | [#2](https://github.com/ArpitKadam/Tunecast/issues/2) | Idempotent submissions: client request ID, UNIQUE constraint, body fingerprint, reconcile by ID | 8 | done 2026-10-26 (`484af1e`) |
+| 11 | [#6](https://github.com/ArpitKadam/Tunecast/issues/6) | Bounded queue admission (429/503 + `Retry-After`), queued-job cancel, sequential sweep default | 10 | done 2026-10-26 (`5e3f9ca`) (no sweep feature exists; the rule for one is in `DECISIONS.md`) |
+| 12 | [#5](https://github.com/ArpitKadam/Tunecast/issues/5) | Experiment lineage (`parent_job_id`, experiment ID, model revision, config snapshot), honest timings, JSON/CSV export | 9, 10 | done 2026-10-26 (`51f5778`) |
+| 13 | [#1](https://github.com/ArpitKadam/Tunecast/issues/1) | Player and Lab tabs on one shared queue/player state | 9, 10, 11, 12 | done 2026-10-27 (`2ca88b0`) |
+| 14 | [#7](https://github.com/ArpitKadam/Tunecast/issues/7) | Visible network/auth state: offline/stale indicators, backoff, sign-out, remember-key choice | 13 | done 2026-10-27 (`2dd1a39`) |
+| 15 | [#8](https://github.com/ArpitKadam/Tunecast/issues/8) | Offline portfolio front door: screenshots, recording, sample, offline demo, README/runbook split | 13, 14 | done 2026-10-27 |
 
 ### Acceptance criteria
 

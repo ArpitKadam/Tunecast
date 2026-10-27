@@ -1,0 +1,62 @@
+{
+ "info": {
+  "model_id": "MiniMaxAI/MiniMax-Music3",
+  "model_revision": "fbdf52fbaaca799592917417eb05f1899f1255ec",
+  "stub": false,
+  "sidecar": {
+   "kind": "fixtures"
+  },
+  "gpus": [],
+  "max_concurrent": 1,
+  "keep_last": 200,
+  "limits": {
+   "max_duration_s": 360,
+   "max_lyrics_chars": 20000,
+   "max_description_chars": 10000,
+   "formats": [
+    "wav"
+   ]
+  }
+ },
+ "jobs": [
+  {
+   "id": "measured-2026-09-03",
+   "status": "succeeded",
+   "queue_position": 0,
+   "created_at": "2026-09-03T00:00:00+00:00",
+   "started_at": null,
+   "finished_at": null,
+   "params": {
+    "lyrics": "[Verse]\nतेरी आँखों में जो सुबह है\nमैंने उसमें ही घर बना लिया\nतेरा नाम लबों पे रख के\nमैंने चुप रहना भी सीख लिया\n\n[Pre-Chorus]\nधीरे धीरे ये दिल कहने लगा\nतू ही मेरा सवेरा है\n\n[Chorus]\nआ जा, थाम ले हाथ मेरा\nहर सफ़र अब तेरा मेरा\nतू जो पास है तो लगे\nहर लम्हा सुनहरा\n\n[Verse]\nबारिशों में तेरी हँसी है\nहर मौसम में तेरा असर\nतेरे बिन ये शहर अधूरा\nतेरे संग हर गली है घर\n\n[Pre-Chorus]\nधीरे धीरे ये दिल कहने लगा\nतू ही मेरा सवेरा है\n\n[Chorus]\nआ जा, थाम ले हाथ मेरा\nहर सफ़र अब तेरा मेरा\nतू जो पास है तो लगे\nहर लम्हा सुनहरा\n\n[Bridge]\nकोई शिकवा नहीं, कोई दूरी नहीं\nबस तेरा साथ हो, और कुछ भी नहीं\n\n[Chorus]\nआ जा, थाम ले हाथ मेरा\nहर सफ़र अब तेरा मेरा\nतू जो पास है तो लगे\nहर लम्हा सुनहरा\n\n[Outro]\nतू ही मेरा सवेरा है\n",
+    "description": "Global Metadata\nBasic Attributes: Hindi romantic film ballad, Bollywood playback style with light Indian orchestral pop production. Gentle mid-slow tempo around 78 to 88 BPM in a warm major tonality with occasional flattened-seventh inflections from Hindustani melodic practice. Simple four-beat feel with an unhurried, lilting sway.\nGlobal Emotional Progression: Opens tender and unguarded, the voice almost speaking to one person in a quiet room. Affection accumulates through the verses rather than announcing itself; the first chorus opens up without becoming loud. The bridge strips back to near silence for a plain confession, the final chorus returns fuller and more devoted, and the outro settles into contentment rather than longing.\nApplication Scenarios & Imagery: A monsoon evening on a terrace; a romantic film sequence built around one unhurried declaration.\nSonics & Production Profile: Warm and roomy, voice close and forward. Midrange rich and woody from the acoustic instruments, top end airy rather than bright. Moderate compression preserves the singer's dynamics; well-defined plate reverb keeps the ballad spacious without washing out consonants.\n\nVocal Details\nVocal Gender & Timbre: A solo female playback vocalist, clear and warm in the mid-register, softly breathy in the lower notes, bright and forward as she rises. Sweet and unforced rather than operatic.\nVocal Style: Conversational and intimate in the verses with generous space between phrases, opening into a sustained, emotionally full delivery in the choruses. Ornamentation is idiomatic to Hindi film singing: light murki turns at phrase ends, gentle meend slides between notes, controlled vibrato held back until the final chorus.\nHarmony/Backing Vocals: The singer doubles herself an octave down beneath the second chorus. Wordless female harmony in thirds enters only in the last chorus. The bridge is sung completely alone.\nVocal FX: Plate reverb with a medium tail, short slapback delay on phrase endings, no audible pitch correction.\n\nArrangement\nInstrument Lifecycle Description: A solo bansuri states the main motif alone in the introduction and returns to close the song, framing the piece. Acoustic guitar arpeggios and a harmonium pad carry the harmony from the first verse to the end. Sarangi answers the vocal in the gaps between verse phrases. Santoor adds shimmering figures at the transitions into each chorus. Strings enter as a soft pad in the first pre-chorus and take the counter-melody in the final chorus.\nGroove & Foundation Progression: No percussion in the introduction or first verse. Tabla enters at the first chorus with a relaxed keherwa pattern, joined by a soft upright bass. The second chorus adds light shakers and a fuller bass line. Everything drops away in the bridge except guitar and voice, then the full ensemble returns for the last chorus and thins again to bansuri and harmonium for the outro.\nEmbellishments, Textures & Spatial FX: A tanpura drone sits quietly under the whole track. Guitar finger slides and the breath of the bansuri stay audible. Transitions are marked by santoor runs rather than cymbal swells.",
+    "duration_s": 180,
+    "seed": 7,
+    "format": "wav"
+   },
+   "progress": {
+    "elapsed_s": 153.9,
+    "estimated_total_s": 153.9,
+    "fraction": 1.0
+   },
+   "estimate": null,
+   "timings": {
+    "inference_s": 153.9
+   },
+   "real_time_factor": 1.03,
+   "gpu": null,
+   "audio_url": "/jobs/measured-2026-09-03/audio",
+   "audio_duration_s": 149.188,
+   "audio_sample_rate": 32000,
+   "audio_channels": 2,
+   "audio_bytes": 19096136,
+   "error": null,
+   "request_id": null,
+   "parent_job_id": null,
+   "experiment_id": null,
+   "model_revision": "fbdf52fbaaca799592917417eb05f1899f1255ec",
+   "config_snapshot": null,
+   "title": "Measured run, 2026-09-03: Hindi ballad (the one real take)",
+   "favorite": false
+  }
+ ]
+}

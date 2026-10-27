@@ -1,0 +1,16 @@
+/* Offline demo only. Loaded after app.css (scripts/build_demo.py). */
+.demo-banner {
+  position: sticky; top: 0; z-index: 2; padding: 0.45rem 1.5rem;
+  background: var(--amber); color: var(--deck); font-size: 0.85rem; line-height: 1.4;
+}
+.demo-banner strong { letter-spacing: 0.03em; }
+.demo-banner span { display: block; font-weight: 400; }
+@media (max-width: 40rem) { .demo-banner { padding: 0.4rem 1rem; font-size: 0.75rem; } }
+
+/* the fixture has no known time of day, and its description is a 3,000-character caption */
+.take .when { display: none; }
+.take .desc { max-height: 6.5rem; overflow: auto; }
+/* pod-only chrome: no key to forget, no pod to terminate, no tunnel to meter */
+#signout, .tally { display: none !important; }
+/* the link lamp reads "online" beside the offline banner; there is no server link to show */
+.masthead .link { display: none !important; }

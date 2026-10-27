@@ -41,7 +41,9 @@ ngrok edge (sliding-ethically-beckham.ngrok-free.dev)
 | Tunnel | `tunecast/tunnel.py` | ngrok subprocess, bind check via local API, restart loop |
 | Supervisor | `tunecast/boot.py` | Boot sequence, sidecar process, readiness state, exit codes |
 | UI | `tunecast/static/index.html`, `app.js`, `app.css` | Markup and `<template>`s; one ES module holding the shared state (jobs, current track, A/B picks, Lab draft, pending submit), the Player and Lab tab panels, one `<audio>` in a player dock outside the panels, polling and key handling; styles |
-| Client | `client/generate.py`, `client/example-*.txt` | Submit, poll with retries, save; end-to-end proof, plus worked Hindi and English examples |
+| Client | `client/generate.py`, `client/example-*-en.txt` | Submit, poll with retries, save; end-to-end proof, plus a worked English example (the Hindi pair from the measured run is bundled in `demo/fixtures.json`) |
+| Demo | `demo/`, `scripts/build_demo.py` | Offline copy of the UI. `index.html`, `app.js`, `app.css` are generated from `tunecast/static/` and committed (`tests/test_demo_build.py` guards drift). `shim.js` answers the API from `fixtures.json` in memory, `demo.css` styles the banner. Audio is the root `song-client.wav`. Needs a static server, not `file://` |
+| Media | `media/`, `scripts/capture_media.py` | README screenshots and a two-tab recording rendered from the real app on the stub sidecar via the e2e `LiveServer`. Interface only, not measurements |
 | Image | `Dockerfile`, `docker/requirements.txt`, `.dockerignore` | Digest-pinned base, four exact-pinned additions on system Python, ngrok binary by sha256, tini entrypoint |
 | CI | `.github/workflows/docker.yml` | `test` job on push, pull request and dispatch (unit tests, then the Playwright e2e suite on chromium); `build` (image build and push to Docker Hub) `needs: test` and never runs on pull requests |
 
@@ -121,11 +123,16 @@ Tunecast/
 ├── tests/               pytest, stub mode only
 │   └── e2e/             Playwright browser suite (`-m e2e`); `LiveServer` = real app + stub sidecar on a free port
 ├── client/generate.py
+├── demo/               offline UI demo: generated index.html/app.js/app.css + shim.js, demo.css, fixtures.json (served statically)
+├── media/              README screenshots and recording, rendered by scripts/capture_media.py from the stub sidecar
+├── scripts/            build_demo.py (regenerates demo/), capture_media.py (regenerates media/)
+├── song-client.wav     the one real output of the measured pod run (not in the image)
 ├── docker/              requirements.txt: additions on top of the base image
 ├── docs/               gitignored: superpowers/{specs,plans}/
 ├── Dockerfile
 ├── pyproject.toml, uv.lock
 ├── .github/workflows/docker.yml
 ├── TASK.md, DECISIONS.md, ARCHITECTURE.md, EXPLANATION.md, README.md
+├── RUNBOOK.md          RunPod template, per-session commands, job recovery, troubleshooting, teardown
 └── CLAUDE.md
 ```
